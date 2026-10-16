@@ -1,9 +1,9 @@
 /**
  * 生成任务编排：提交 → （按需）轮询 → 取回图片
  *
- * 统一处理四族协议差异：
- *  - 有的同步直出图片（GRS / NewAPI / OpenAI）
- *  - 有的返回 taskId 需要轮询（RunningHub）
+ * 统一处理协议差异：
+ *  - 自定义渠道多为同步直出图片
+ *  - RunningHub 返回 taskId 需要轮询
  */
 
 import type { Channel, SubmitRequest, PollResult } from './types'
@@ -133,6 +133,28 @@ export async function fetchResultBitmap(url: string): Promise<ImageBitmap> {
   if (!resp.ok) throw new AIError(`下载结果失败 HTTP ${resp.status}`)
   const blob = await resp.blob()
   return createImageBitmap(blob)
+}
+
+/**
+ * 拉取渠道可用模型
+ *
+ * 用户要求模型列表从对方网站自动获取，而不是本地写死 ——
+ * 这样渠道上新模型时无需改代码。
+ * 各 provider 自行决定用哪个端点与过滤规则。
+ */
+export async function fetchModels(channel: Channel, apiKey: string): Promise<string[]> {
+  const provider = getProvider(channel.family)
+  if (!provider.listImageModels) return []
+
+  for (const baseUrl of urlsFor(channel)) {
+    try {
+      const list = await provider.listImageModels(apiKey, baseUrl)
+      if (list.length) return list
+    } catch (e) {
+      console.warn('[pipeline] 模型拉取失败', baseUrl, (e as Error)?.message)
+    }
+  }
+  return []
 }
 
 /** 查询渠道余额 */

@@ -3,6 +3,39 @@
 .cc-head { display: flex; align-items: center; justify-content: space-between; }
 .cc-title { font-size: 13px; color: var(--c-ink-50); }
 
+/* 预置渠道快捷入口 */
+.cc-presets {
+  padding: 11px;
+  border-radius: var(--r-md);
+  background: var(--c-ink-04);
+  animation: enter-rise var(--dur-base) var(--ease-out) both;
+}
+.cc-presets-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--c-ink-50);
+  margin-bottom: 9px;
+}
+.cc-presets-list { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.cc-preset {
+  border: 1px solid var(--c-ink-12);
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 12px;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  transition: border-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cc-preset:hover { border-color: var(--c-accent); color: var(--c-accent); }
+.cc-preset:active { transform: scale(0.95); }
+
 .cc-empty {
   font-size: 13px;
   color: var(--c-ink-30);

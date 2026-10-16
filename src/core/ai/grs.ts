@@ -109,9 +109,24 @@ async function fetchBalance(apiKey: string, baseUrl: string): Promise<Balance> {
   return { balance: Number.isFinite(n) ? n : null, currency: 'CREDIT' }
 }
 
+/** GRS 的模型列表与其他 OpenAI 兼容渠道一致 */
+async function listImageModels(apiKey: string, baseUrl: string): Promise<string[]> {
+  try {
+    const res = await fetchJson(`${baseUrl}/v1/models`, {
+      method: 'GET', headers: { Authorization: `Bearer ${apiKey}` },
+    }, 20000, 'GRS')
+    const arr = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : []
+    const ids = arr.map((m: any) => String(m?.id || m?.name || '')).filter(Boolean)
+    return ids.sort()
+  } catch {
+    return []
+  }
+}
+
 export const grsProvider: Provider = {
   family: 'grs',
   submit,
   poll,
   fetchBalance,
+  listImageModels,
 }

@@ -2,6 +2,7 @@
 import {
   Wand2, Lasso, Brush, Eraser, Move, SlidersHorizontal,
   Undo2, Redo2, Upload, Download, Settings, Layers, Sparkles,
+  SquareDashed,
 } from 'lucide-react'
 import { useEditor, type ToolId } from '../../state/editorStore'
 import { Button } from '../primitives/Button'
@@ -18,6 +19,7 @@ interface Props {
 
 const TOOLS: Array<{ id: ToolId; label: string; icon: typeof Move }> = [
   { id: 'move', label: '移动', icon: Move },
+  { id: 'rect', label: '矩形', icon: SquareDashed },
   { id: 'lasso', label: '套索', icon: Lasso },
   { id: 'wand', label: '魔术棒', icon: Wand2 },
   { id: 'brush', label: '蒙版', icon: Brush },

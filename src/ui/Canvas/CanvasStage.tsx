@@ -1,9 +1,10 @@
 /** 画布舞台：渲染文档 + 选区叠加层 + 手势 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer as KLayer, Image as KImage, Line } from 'react-konva'
+import { Stage, Layer as KLayer, Image as KImage, Line, Rect } from 'react-konva'
 import Konva from 'konva'
 import { useEditor } from '../../state/editorStore'
 import { LassoTool } from '../../core/selection/lasso'
+import { RectTool } from '../../core/selection/rect'
 import { BrushTool } from '../../core/selection/brush'
 import { DEFAULT_BRUSH } from '../../core/selection/brush'
 import { magicWand, createMask, feather } from '../../core/selection/mask'
@@ -14,6 +15,7 @@ import { useGestures } from './useGestures'
 import './CanvasStage.css'
 
 const lasso = new LassoTool()
+const rect = new RectTool()
 const brush = new BrushTool()
 
 export function CanvasStage() {
@@ -31,7 +33,17 @@ export function CanvasStage() {
   const sourceBitmap = useEditor((s) => s.sourceBitmap)
   const pushSelectionHistory = useEditor((s) => s.pushSelectionHistory)
 
+  // 切换工具时清掉未完成的预览，避免残留图形
+  useEffect(() => {
+    lasso.cancel()
+    rect.cancel()
+    brush.end()
+    setLassoPoints([])
+    setRectPreview(null)
+  }, [tool])
+
   const [lassoPoints, setLassoPoints] = useState<number[]>([])
+  const [rectPreview, setRectPreview] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [brushCursor, setBrushCursor] = useState<{ x: number; y: number } | null>(null)
   const isDrawing = useRef(false)
 
@@ -73,17 +85,39 @@ export function CanvasStage() {
     }
   }, [doc, base, view, size])
 
+  // 手势回调用 ref 读取最新值，避免闭包捕获旧的 view
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const sizeRef = useRef(size)
+  sizeRef.current = size
+  const toolRef = useRef(tool)
+  toolRef.current = tool
+
   useGestures(containerRef.current, {
-    onTransform: (t) => {
-      if (tool !== 'move') return
-      if (t.zoom !== undefined) {
-        const z = Math.max(0.3, Math.min(8, view.zoom * t.zoom))
-        setView({ zoom: z })
-      }
-      if (t.panX !== undefined && t.panY !== undefined) {
-        setView({ panX: view.panX + t.panX, panY: view.panY + t.panY })
+    onPan: (dx, dy) => {
+      // 画笔类工具下，单指用于涂抹，不平移
+      const t = toolRef.current
+      if (t === 'brush' || t === 'erase' || t === 'lasso' || t === 'rect' || t === 'wand') return
+      const v = viewRef.current
+      setView({ panX: v.panX + dx, panY: v.panY + dy })
+    },
+
+    // 双指缩放：任何工具下都可用，这是移动端的基本预期
+    onZoomAt: ({ factor, cx, cy }) => {
+      const s = sizeRef.current
+      useEditor.getState().zoomAt(factor, cx, cy, s.w, s.h)
+    },
+
+    // 双击在「适应窗口」与 2 倍之间切换
+    onDoubleTap: (_x, _y) => {
+      const v = viewRef.current
+      if (v.zoom > 1.05) {
+        setView({ zoom: 1, panX: 0, panY: 0 })
+      } else {
+        setView({ zoom: 2, panX: v.panX, panY: v.panY })
       }
     },
+
     onLongPress: () => setShowOriginal(true),
     onLongPressEnd: () => setShowOriginal(false),
     enabled: true,
@@ -97,7 +131,10 @@ export function CanvasStage() {
     isDrawing.current = true
     const p = toDoc(pos.x, pos.y)
 
-    if (tool === 'lasso') {
+    if (tool === 'rect') {
+      rect.begin(p.x, p.y)
+      setRectPreview(null)
+    } else if (tool === 'lasso') {
       lasso.begin(p.x, p.y)
       setLassoPoints([p.x, p.y])
     } else if (tool === 'wand') {
@@ -133,7 +170,10 @@ export function CanvasStage() {
     // 用自维护的按下状态判断，比 evt.buttons 可靠
     if (!isDrawing.current) return
 
-    if (tool === 'lasso' && !lasso.isEmpty()) {
+    if (tool === 'rect' && !rect.isEmpty()) {
+      rect.move(p.x, p.y)
+      setRectPreview(rect.getRect())
+    } else if (tool === 'lasso' && !lasso.isEmpty()) {
       lasso.move(p.x, p.y)
       const pts = lasso.getPoints()
       setLassoPoints(pts.flatMap((q) => [q.x, q.y]))
@@ -145,9 +185,14 @@ export function CanvasStage() {
 
   const handlePointerUp = useCallback(() => {
     isDrawing.current = false
+    if (tool === 'rect' && doc) {
+      const m = rect.finish(doc.width, doc.height)
+      if (m) pushSelectionHistory('矩形选框', m)
+      setRectPreview(null)
+    }
     if (tool === 'lasso' && !lasso.isEmpty() && doc) {
       const m = lasso.finish(doc.width, doc.height)
-      if (m) setSelection(m)
+      if (m) pushSelectionHistory('套索选区', m)
       setLassoPoints([])
     }
     // 笔刷/擦除结束后把选区写入历史，否则撤销无效
@@ -195,6 +240,21 @@ export function CanvasStage() {
               viewWidth={base.w}
               viewHeight={base.h}
               zoom={view.zoom}
+            />
+          )}
+
+          {/* 矩形选框预览 */}
+          {rectPreview && doc && (
+            <Rect
+              x={(rectPreview.x / doc.width) * base.w}
+              y={(rectPreview.y / doc.height) * base.h}
+              width={(rectPreview.w / doc.width) * base.w}
+              height={(rectPreview.h / doc.height) * base.h}
+              stroke="#2563EB"
+              strokeWidth={2 / view.zoom}
+              dash={[6 / view.zoom, 4 / view.zoom]}
+              fill="rgba(37,99,235,0.12)"
+              listening={false}
             />
           )}
 

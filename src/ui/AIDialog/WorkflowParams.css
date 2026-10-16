@@ -1,0 +1,91 @@
+.wfp {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 12px;
+  background: var(--c-ink-04);
+  border-radius: var(--r-md);
+  animation: enter-rise var(--dur-base) var(--ease-out) both;
+}
+
+.wfp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--c-ink);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--c-ink-08);
+}
+.wfp-count { font-size: 11px; color: var(--c-ink-40); }
+
+.wfp-field { display: flex; flex-direction: column; gap: 6px; }
+
+.wfp-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--c-ink-60);
+}
+.wfp-name { flex: 1; }
+.wfp-req {
+  font-size: 10px;
+  color: var(--c-danger);
+  border: 1px solid currentColor;
+  border-radius: var(--r-full);
+  padding: 0 5px;
+  line-height: 15px;
+}
+
+.wfp-input {
+  width: 100%;
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  resize: vertical;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.wfp-input:focus { outline: none; border-color: var(--c-accent); }
+
+.wfp-num { display: flex; align-items: center; gap: 10px; }
+.wfp-num input[type='range'] {
+  flex: 1;
+  accent-color: var(--c-accent);
+  height: 4px;
+}
+.wfp-numval {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  background: var(--c-bg);
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-sm);
+  padding: 3px 6px;
+}
+
+.wfp-image {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--c-accent);
+  background: rgba(37, 99, 235, 0.07);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+}
+
+.wfp-switch {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.wfp-switch input { width: 17px; height: 17px; accent-color: var(--c-accent); }
+
+.wfp-desc { font-size: 11px; color: var(--c-ink-40); line-height: 1.45; }

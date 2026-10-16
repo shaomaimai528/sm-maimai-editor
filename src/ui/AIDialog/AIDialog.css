@@ -17,7 +17,79 @@
 }
 
 .ai-field { display: flex; flex-direction: column; gap: 8px; }
-.ai-label { font-size: 13px; color: var(--c-ink-50); }
+.ai-label {
+  font-size: 13px;
+  color: var(--c-ink-50);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 刷新模型列表 */
+.ai-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--c-accent);
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.ai-refresh:hover { background: rgba(37, 99, 235, 0.08); }
+.ai-refresh:active { transform: scale(0.95); }
+.ai-refresh:disabled { color: var(--c-ink-30); cursor: default; }
+.ai-refresh .spinning { animation: spin 900ms linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 接入自定义渠道的引导入口 */
+.ai-add-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  border: 1px dashed var(--c-ink-20);
+  background: transparent;
+  color: var(--c-accent);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-base) var(--ease-out),
+              background-color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.ai-add-channel:hover {
+  border-color: var(--c-accent);
+  background: rgba(37, 99, 235, 0.05);
+}
+.ai-add-channel:active { transform: scale(0.97); }
+
+.ai-hint-warn {
+  font-size: 12px;
+  color: var(--c-danger);
+  line-height: 1.45;
+  animation: enter-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.ai-input {
+  width: 100%;
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-md);
+  padding: 11px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.ai-input:focus { outline: none; border-color: var(--c-accent); }
 
 .ai-select, .ai-textarea {
   width: 100%;

@@ -3,18 +3,20 @@
  * 这是产品的核心工作流界面
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Sparkles, X, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Sparkles, X, AlertCircle, CheckCircle2, Loader2, RefreshCw, Workflow, Plus } from 'lucide-react'
 import { Sheet } from '../primitives/Sheet'
 import { Button } from '../primitives/Button'
 import { useEditor } from '../../state/editorStore'
 import { allChannels, getChannel } from '../../core/ai/channels'
-import { generate, fetchResultBitmap } from '../../core/ai/pipeline'
+import { generate, fetchResultBitmap, fetchModels } from '../../core/ai/pipeline'
 import { AIError } from '../../core/ai/types'
 import {
   contextBounds, cropForAI, composeResult, selectionBounds,
 } from '../../core/render/pasteback'
 import { createLayer } from '../../core/doc/document'
 import { uid } from '../../core/doc/types'
+import { fetchWorkflow, buildNodeInfoList, type WorkflowInfo, type WorkflowParam } from '../../core/ai/workflow'
+import { WorkflowParams } from './WorkflowParams'
 import type { AppSettings } from '../../state/settings'
 import './AIDialog.css'
 
@@ -24,6 +26,12 @@ interface Props {
   settings: AppSettings
   apiKey: string
   onNeedKey: (channelId: string) => void
+  /** 切换渠道；second 参数为要同时选中的模型（可空，空则沿用该渠道记住的） */
+  onPickChannel: (channelId: string, model?: string) => void
+  /** 切换模型 */
+  onPickModel: (model: string) => void
+  /** 还没有自定义渠道时，引导用户去添加 */
+  onAddChannel: () => void
 }
 
 const PRESETS = [
@@ -34,13 +42,26 @@ const PRESETS = [
   '换成大理石材质',
 ]
 
-export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) {
+export function AIDialog({
+  open, onClose, settings, apiKey, onNeedKey, onPickChannel, onPickModel, onAddChannel,
+}: Props) {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [phase, setPhase] = useState('')
   const [preview, setPreview] = useState<ImageBitmap | null>(null)
   const [resultLayer, setResultLayer] = useState<{ id: string; bitmap: ImageBitmap } | null>(null)
+
+  // 模型列表（从对方网站拉取）
+  const [modelList, setModelList] = useState<string[]>([])
+  const [modelLoading, setModelLoading] = useState(false)
+  const [modelError, setModelError] = useState('')
+
+  // RunningHub 工作流参数
+  const [wfInfo, setWfInfo] = useState<WorkflowInfo | null>(null)
+  const [wfParams, setWfParams] = useState<WorkflowParam[]>([])
+  const [wfLoading, setWfLoading] = useState(false)
+  const [wfError, setWfError] = useState('')
 
   const doc = useEditor((s) => s.doc)
   const sourceBitmap = useEditor((s) => s.sourceBitmap)
@@ -67,6 +88,79 @@ export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) 
       setResultLayer(null)
     }
   }, [open])
+
+  /**
+   * 选中 RunningHub 时自动拉取工作流参数
+   * 工作流 ID 或 Key 变化都重新拉，因为权限与参数都会随之变化
+   */
+  const loadWorkflow = useCallback(async () => {
+    if (!open) return
+    if (channel?.family !== 'runninghub') { setWfInfo(null); setWfParams([]); setWfError(''); return }
+
+    const wfId = settings.runningHubWorkflowId?.trim()
+    if (!wfId) {
+      setWfInfo(null); setWfParams([])
+      setWfError('请先在设置里填写工作流 ID')
+      return
+    }
+    if (!apiKey) {
+      setWfInfo(null); setWfParams([])
+      setWfError('请先填写该渠道的 API Key')
+      return
+    }
+
+    setWfLoading(true)
+    setWfError('')
+    try {
+      const info = await fetchWorkflow(wfId, apiKey, channel.apiUrl)
+      setWfInfo(info)
+      setWfParams(info.params)
+    } catch (e) {
+      setWfInfo(null)
+      setWfParams([])
+      setWfError((e as Error)?.message || '获取工作流参数失败')
+    } finally {
+      setWfLoading(false)
+    }
+  }, [open, channel, settings.runningHubWorkflowId, apiKey])
+
+  useEffect(() => { loadWorkflow() }, [loadWorkflow])
+
+  /**
+   * 拉取模型列表
+   * 用户要求模型从对方网站实时获取而非本地写死，这样渠道上新模型无需改代码。
+   * RunningHub 由工作流自身决定参数，不需要选模型。
+   */
+  const reloadModels = useCallback(async () => {
+    if (!open) return
+    if (!channel || channel.family === 'runninghub') { setModelList([]); setModelError(''); return }
+    if (!apiKey) { setModelList([]); setModelError(''); return }
+    if (!channel.apiUrl || /example\.invalid/.test(channel.apiUrl)) {
+      setModelList([]); setModelError('请先填写接口地址')
+      return
+    }
+
+    setModelLoading(true)
+    setModelError('')
+    try {
+      const list = await fetchModels(channel, apiKey)
+      setModelList(list)
+      if (!list.length) {
+        setModelError('对方未返回模型列表，可手动填写模型名')
+      } else if (!list.includes(settings.activeModel)) {
+        // 当前选中的模型不在新列表里，自动切到第一个
+        onPickModel(list[0])
+      }
+    } catch (e) {
+      setModelList([])
+      setModelError((e as Error)?.message || '获取模型失败')
+    } finally {
+      setModelLoading(false)
+    }
+  }, [open, channel, apiKey, settings.activeModel, onPickModel])
+
+  // 渠道或 Key 变化时自动重新拉取
+  useEffect(() => { reloadModels() }, [reloadModels])
 
   const handleGenerate = useCallback(async () => {
     if (!doc || !sourceBitmap) { setError('请先导入图片'); return }
@@ -161,7 +255,7 @@ export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) 
           )}
         </div>
 
-        {/* 渠道与模型 */}
+        {/* 渠道 */}
         <div className="ai-field">
           <label className="ai-label">渠道</label>
           <select
@@ -171,28 +265,59 @@ export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) 
               const id = e.target.value
               const c = getChannel(id)
               onNeedKey(id)
-              // 切换渠道时同步切换默认模型
-              ;(window as any).__dshSetChannel?.(id, c?.defaultModel || c?.imageModels[0] || '')
+              onPickChannel(id, c?.defaultModel || '')
             }}
           >
             {channels.map((c) => (
               <option key={c.id} value={c.id}>{c.label}</option>
             ))}
           </select>
+
+          {/* 没有任何自定义渠道时给出入口提示 */}
+          {channels.filter((c) => c.isUserDefined).length === 0 && (
+            <button className="ai-add-channel" type="button" onClick={onAddChannel}>
+              <Plus size={14} />
+              接入自定义接口（OpenAI 兼容）
+            </button>
+          )}
         </div>
 
-        {channel.imageModels.length > 0 && (
+        {/* 模型：从对方网站自动拉取；RunningHub 不需要选模型 */}
+        {channel.family !== 'runninghub' && (
           <div className="ai-field">
-            <label className="ai-label">模型</label>
-            <select
-              className="ai-select"
-              value={settings.activeModel}
-              onChange={(e) => (window as any).__dshSetModel?.(e.target.value)}
-            >
-              {channel.imageModels.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            <label className="ai-label">
+              模型
+              <button
+                className="ai-refresh"
+                onClick={reloadModels}
+                disabled={modelLoading}
+                type="button"
+              >
+                <RefreshCw size={13} className={modelLoading ? 'spinning' : ''} />
+                {modelLoading ? '获取中' : '刷新'}
+              </button>
+            </label>
+
+            {modelList.length > 0 ? (
+              <select
+                className="ai-select"
+                value={settings.activeModel}
+                onChange={(e) => onPickModel(e.target.value)}
+              >
+                {modelList.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className="ai-input"
+                value={settings.activeModel}
+                placeholder={modelLoading ? '正在获取模型列表' : '填 API Key 后自动获取，也可手填'}
+                onChange={(e) => onPickModel(e.target.value)}
+              />
+            )}
+
+            {modelError && <div className="ai-hint-warn">{modelError}</div>}
           </div>
         )}
 

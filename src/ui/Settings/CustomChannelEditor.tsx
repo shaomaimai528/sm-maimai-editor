@@ -6,10 +6,11 @@
  * 默认值已按 OpenAI 兼容格式填好，多数情况下只需填地址、Key、模型名。
  */
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Plus, Trash2, Zap } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Trash2, Zap, Download } from 'lucide-react'
 import { Button } from '../primitives/Button'
 import type { UserChannelConfig } from '../../state/settings'
 import { makeDefaultUserChannel } from '../../state/settings'
+import { CHANNEL_PRESETS, PRESET_ID_PREFIX } from '../../core/ai/presets'
 import { uid } from '../../core/doc/types'
 import './CustomChannelEditor.css'
 
@@ -29,6 +30,29 @@ export function CustomChannelEditor({ channels, onChange, onTest }: Props) {
     const cfg = makeDefaultUserChannel(uid('custom'))
     onChange([...channels, cfg])
     setExpanded(cfg.id)
+  }
+
+  /** 一键添加预置渠道：地址与协议都填好，用户只需补 Key */
+  const addPreset = (key: string) => {
+    const p = CHANNEL_PRESETS.find((x) => x.key === key)
+    if (!p) return
+    const id = PRESET_ID_PREFIX + p.key
+    if (channels.some((c) => c.id === id)) return
+    const cfg = makeDefaultUserChannel(id)
+    cfg.label = p.label
+    cfg.apiUrl = p.apiUrl
+    cfg.models = p.defaultModel
+    cfg.mode = p.spec.mode
+    cfg.submitPath = p.spec.submitPath || '/v1/images/generations'
+    cfg.pollPath = p.spec.pollPath || ''
+    cfg.imageField = p.spec.imageField || 'image'
+    cfg.promptField = p.spec.promptField || 'prompt'
+    cfg.modelField = p.spec.modelField || 'model'
+    cfg.taskIdField = p.spec.taskIdField || 'taskId'
+    cfg.imageAsDataUrl = p.spec.imageAsDataUrl !== false
+    cfg.authHeader = p.spec.authHeader || 'Authorization'
+    cfg.authPrefix = p.spec.authPrefix ?? 'Bearer '
+    onChange([...channels, cfg])
   }
 
   const update = (id: string, patch: Partial<UserChannelConfig>) => {
@@ -61,8 +85,31 @@ export function CustomChannelEditor({ channels, onChange, onTest }: Props) {
         </Button>
       </div>
 
+      {/* 预置渠道：地址已经填好，点一下即可加入 */}
+      {(() => {
+        const available = CHANNEL_PRESETS.filter(
+          (p) => !channels.some((c) => c.id === PRESET_ID_PREFIX + p.key)
+        )
+        if (!available.length) return null
+        return (
+          <div className="cc-presets">
+            <div className="cc-presets-title">
+              <Download size={13} />
+              常用渠道 点一下自动填入地址
+            </div>
+            <div className="cc-presets-list">
+              {available.map((p) => (
+                <button key={p.key} className="cc-preset" onClick={() => addPreset(p.key)}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {channels.length === 0 && (
-        <div className="cc-empty">还没有自定义渠道，点「添加」接入你自己的接口</div>
+        <div className="cc-empty">还没有自定义渠道，点上方预置项或「添加」接入自己的接口</div>
       )}
 
       {channels.map((cfg) => {

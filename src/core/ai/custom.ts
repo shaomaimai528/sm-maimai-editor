@@ -142,9 +142,36 @@ async function fetchBalance(): Promise<Balance> {
   return { balance: null, currency: '' }
 }
 
+/**
+ * 从对方网站拉取可用模型
+ * 走标准的 GET /v1/models；若对方没实现该端点则返回空，界面退化为手填
+ */
+async function listImageModels(apiKey: string, baseUrl: string): Promise<string[]> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+
+  const res = await fetchJson(`${baseUrl.replace(/\/+$/, '')}/v1/models`, {
+    method: 'GET', headers,
+  }, 20000, '自定义渠道')
+
+  const list = res?.data ?? res?.models ?? res?.result ?? []
+  if (!Array.isArray(list)) return []
+
+  const ids = list
+    .map((m: any) => (typeof m === 'string' ? m : m?.id ?? m?.model ?? m?.name ?? ''))
+    .filter((s: unknown): s is string => typeof s === 'string' && !!s)
+
+  // 优先留下图像类模型；若一个都识别不出，说明可能专做图片，全部返回
+  const imageish = ids.filter((id) =>
+    /gpt-image|dall-?e|image|flux|sd|stable|banana|seedream|kolors|qwen|wanx|midjourney|mj_|doubao/i.test(id)
+  )
+  return (imageish.length ? imageish : ids).sort()
+}
+
 export const customProvider: Provider = {
   family: 'custom',
   submit,
   poll,
   fetchBalance,
+  listImageModels,
 }

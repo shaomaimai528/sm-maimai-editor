@@ -87,6 +87,11 @@ export interface Provider {
   poll(taskId: string, apiKey: string, baseUrl: string): Promise<PollResult>
   cancel?(taskId: string, apiKey: string, baseUrl: string): Promise<void>
   fetchBalance?(apiKey: string, baseUrl: string): Promise<Balance>
+  /**
+   * 拉取该渠道可用的图片模型列表
+   * 有则界面上「模型」变为下拉可选，没有则退化为手填
+   */
+  listImageModels?(apiKey: string, baseUrl: string): Promise<string[]>
 }
 
 /** 提交结果：可能是任务 id（需轮询），也可能直接返回图片 */

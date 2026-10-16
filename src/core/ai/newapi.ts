@@ -82,9 +82,19 @@ export async function listModels(apiKey: string, baseUrl: string): Promise<strin
   }
 }
 
+/** 只保留图片模型；NewAPI 的渠道前缀必须原样保留 */
+export async function listImageModels(apiKey: string, baseUrl: string): Promise<string[]> {
+  const all = await listModels(apiKey, baseUrl)
+  const imageish = all.filter((id) =>
+    /\[.*?\]|gpt-image|dall-?e|image|flux|banana|seedream|kolors|mj_|midjourney/i.test(id)
+  )
+  return imageish.length ? imageish.sort() : all.sort()
+}
+
 export const newapiProvider: Provider = {
   family: 'newapi',
   submit,
   poll,
   fetchBalance,
+  listImageModels,
 }

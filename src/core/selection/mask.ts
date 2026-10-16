@@ -19,6 +19,26 @@ export function createMask(width: number, height: number, fill = 0): MaskBuffer 
   return { data, width, height }
 }
 
+/**
+ * 生成矩形选区
+ * 用画布绘制以获得抗锯齿边缘，与套索保持一致的边缘质量
+ */
+export function maskFromRect(
+  x: number, y: number, w: number, h: number,
+  width: number, height: number,
+): MaskBuffer {
+  const canvas = new OffscreenCanvas(width, height)
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, width, height)
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(x, y, w, h)
+
+  const img = ctx.getImageData(0, 0, width, height)
+  const out = new Uint8ClampedArray(width * height)
+  for (let i = 0, p = 0; i < out.length; i++, p += 4) out[i] = img.data[p + 3]
+  return { data: out, width, height }
+}
+
 /** 把点集渲染成抗锯齿的选区蒙版（套索用） */
 export function maskFromPolygon(
   points: Array<{ x: number; y: number }>,

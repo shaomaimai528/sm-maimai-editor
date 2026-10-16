@@ -20,19 +20,18 @@
   background: var(--c-bg);
 }
 
-.empty-icon {
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  background: var(--c-ink-06);
-  color: var(--c-ink-30);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 4px;
+.empty-logo {
+  width: 108px;
+  height: 108px;
+  border-radius: 26px;
+  object-fit: cover;
+  margin-bottom: 6px;
   /* 出现动画 */
   animation: enter-scale var(--dur-slow) var(--ease-out) both;
+  /* 轻微呼吸，让空状态不呆板 */
+  transition: transform var(--dur-slow) var(--ease-out);
 }
+.empty-logo:active { transform: scale(0.96); }
 
 .empty-title {
   font-size: 28px;

@@ -12,8 +12,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon.svg'],
       manifest: {
-        name: 'AI 修图',
-        short_name: 'AI修图',
+        name: 'SM烧麦麦修图',
+        short_name: '烧麦麦修图',
         description: '手机端 AI 修图，支持选区蒙版与多渠道生成',
         theme_color: '#FFFFFF',
         background_color: '#FFFFFF',

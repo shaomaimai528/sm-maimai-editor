@@ -48,6 +48,31 @@ export interface AppSettings {
   openaiUseEdits: boolean
   /** 用户自建渠道列表 */
   userChannels: UserChannelConfig[]
+  /** 各渠道上次选中的模型，切回自动恢复 */
+  lastModelByChannel: Record<string, string>
+  /** 各渠道缓存的模型列表（拉取过一次就记住，避免重复请求） */
+  modelCacheByChannel: Record<string, string[]>
+  /** 是否每次打开都回到默认渠道，false 则沿用上次用的 */
+  rememberLastChannel: boolean
+}
+
+/**
+ * 取某渠道当前应使用的模型
+ * 优先用记住的，其次用渠道默认，最后取列表第一个
+ */
+export function resolveModel(
+  s: AppSettings,
+  channelId: string,
+  channelDefault?: string,
+  channelModels?: string[],
+): string {
+  const remembered = s.lastModelByChannel?.[channelId]
+  // 记住的模型若已不在列表里（渠道调整过），则弃用
+  if (remembered && (!channelModels?.length || channelModels.includes(remembered))) {
+    return remembered
+  }
+  if (s.activeChannelId === channelId && s.activeModel) return s.activeModel
+  return channelDefault || channelModels?.[0] || ''
 }
 
 export function makeDefaultUserChannel(id: string): UserChannelConfig {
@@ -71,8 +96,8 @@ export function makeDefaultUserChannel(id: string): UserChannelConfig {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   credentials: [],
-  activeChannelId: 'grs-cn',
-  activeModel: 'gemini-3.1-flash-image-preview',
+  activeChannelId: 'runninghub-cn',
+  activeModel: '',
   aspectRatio: 'auto',
   resolution: '1K',
   featherRadius: 12,
@@ -81,6 +106,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   runningHubWorkflowId: '',
   openaiUseEdits: false,
   userChannels: [],
+  lastModelByChannel: {},
+  modelCacheByChannel: {},
+  rememberLastChannel: true,
 }
 
 const KEY = 'app-settings-v1'

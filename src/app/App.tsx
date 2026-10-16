@@ -10,7 +10,7 @@ import { AdjustDialog } from '../ui/Adjust/AdjustDialog'
 import { Button } from '../ui/primitives/Button'
 import { useEditor } from '../state/editorStore'
 import { loadSettings, saveSettings, getKeyFor, type AppSettings, DEFAULT_SETTINGS } from '../state/settings'
-import { setUserChannels, makeCustomChannel } from '../core/ai/channels'
+import { setUserChannels, makeCustomChannel, getChannel } from '../core/ai/channels'
 import { loadImageFile } from '../core/render/load'
 import { renderDoc } from '../core/render/pipeline'
 import { createDoc } from '../core/doc/document'
@@ -73,14 +73,33 @@ export function App() {
     saveSettings(s)
   }, [])
 
-  // 暴露给 AIDialog 的渠道/模型切换（避免把 settings 全量透传下去）
-  useEffect(() => {
-    ;(window as any).__dshSetChannel = (id: string, model: string) => {
-      persist({ ...settings, activeChannelId: id, activeModel: model })
-    }
-    ;(window as any).__dshSetModel = (model: string) => {
-      persist({ ...settings, activeModel: model })
-    }
+  /**
+   * 切换渠道
+   * 记住每个渠道各自用过的模型，切回来时自动恢复 ——
+   * 用户不必每次修图都重选一遍渠道和模型
+   */
+  const handlePickChannel = useCallback((id: string, model?: string) => {
+    const ch = getChannel(id)
+    const remembered = settings.lastModelByChannel?.[id]
+    const next = model || remembered || ch?.defaultModel || ''
+    persist({
+      ...settings,
+      activeChannelId: id,
+      activeModel: next,
+      lastModelByChannel: { ...(settings.lastModelByChannel || {}), [id]: next },
+    })
+  }, [settings, persist])
+
+  /** 切换模型，同时记到当前渠道名下 */
+  const handlePickModel = useCallback((model: string) => {
+    persist({
+      ...settings,
+      activeModel: model,
+      lastModelByChannel: {
+        ...(settings.lastModelByChannel || {}),
+        [settings.activeChannelId]: model,
+      },
+    })
   }, [settings, persist])
 
   const toastTimer = useRef<number | null>(null)
@@ -129,8 +148,8 @@ export function App() {
 
       {!doc && (
         <div className="empty">
-          <div className="empty-icon"><ImagePlus size={40} /></div>
-          <h1 className="empty-title">AI 修图</h1>
+          <img className="empty-logo" src="./icons/icon-192.png" alt="SM烧麦麦修图" />
+          <h1 className="empty-title">SM烧麦麦修图</h1>
           <p className="empty-sub">导入一张照片开始</p>
           <Button variant="primary" size="lg" icon={<ImagePlus size={20} />} onClick={() => fileRef.current?.click()}>
             选择图片
@@ -154,6 +173,12 @@ export function App() {
         apiKey={apiKey}
         onNeedKey={(id) => {
           showToast('请先在设置中填写该渠道的 API Key')
+          setShowSettings(true)
+        }}
+        onPickChannel={handlePickChannel}
+        onPickModel={handlePickModel}
+        onAddChannel={() => {
+          setShowAI(false)
           setShowSettings(true)
         }}
       />

@@ -68,9 +68,40 @@ async function fetchBalance(): Promise<Balance> {
   return { balance: null, currency: 'USD' }
 }
 
+/** 拉取可用图片模型：GET /v1/models，只保留能出图的 */
+export async function listImageModels(apiKey: string, baseUrl: string): Promise<string[]> {
+  const res = await fetchJson(`${baseUrl}/v1/models`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  }, 30000, 'OpenAI')
+
+  return pickImageModels(res)
+}
+
+/**
+ * 从 /v1/models 的返回里挑出图片模型
+ * 各家中转返回的 id 命名不一，用关键词宽松匹配
+ */
+export function pickImageModels(res: any): string[] {
+  const list = res?.data ?? res?.models ?? res?.result ?? []
+  if (!Array.isArray(list)) return []
+
+  const ids = list
+    .map((m: any) => (typeof m === 'string' ? m : m?.id ?? m?.model ?? m?.name ?? ''))
+    .filter((s: unknown): s is string => typeof s === 'string' && !!s)
+
+  // 先找明确带 image 的
+  const imageish = ids.filter((id) =>
+    /gpt-image|dall-?e|image|flux|sd|stable|banana|seedream|qwen-image|kolors|doubao.*image|wanx|midjourney|mj_/i.test(id)
+  )
+  // 若一个都没有，说明可能是专做图片的中转，全部返回
+  return (imageish.length ? imageish : ids).sort()
+}
+
 export const openaiProvider: Provider = {
   family: 'openai',
   submit,
   poll,
   fetchBalance,
+  listImageModels,
 }

@@ -6,7 +6,7 @@ import { History } from '../core/doc/history'
 import type { MaskBuffer } from '../core/selection/mask'
 import { activeLayer as findActive, insertLayerAbove, removeLayer as removeLayerOp, updateLayer as updateLayerOp, moveLayer as moveLayerOp } from '../core/doc/document'
 
-export type ToolId = 'move' | 'lasso' | 'wand' | 'brush' | 'erase' | 'adjust'
+export type ToolId = 'move' | 'rect' | 'lasso' | 'wand' | 'brush' | 'erase' | 'adjust'
 
 interface EditorState {
   doc: Doc | null
@@ -46,6 +46,8 @@ interface EditorState {
   redo: () => void
 
   setView: (v: { zoom?: number; panX?: number; panY?: number }) => void
+  /** 围绕画布上某点缩放，并同步补偿位移 —— 必须原子提交，否则缩放会跑偏 */
+  zoomAt: (factor: number, cx: number, cy: number, viewW: number, viewH: number) => void
   setShowOriginal: (v: boolean) => void
 }
 
@@ -163,6 +165,24 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   setView: (v) => set((s) => ({ zoom: v.zoom ?? s.zoom, panX: v.panX ?? s.panX, panY: v.panY ?? s.panY })),
+
+  /**
+   * 围绕指定点缩放
+   * 设缩放前该点在图片上的位置为 P，缩放后要保持 P 停在手指下，
+   * 位移需补偿 (锚点 - 画布中心) * (1 - factor)
+   */
+  zoomAt: (factor, cx, cy, viewW, viewH) => set((s) => {
+    const next = Math.max(0.25, Math.min(12, s.zoom * factor))
+    // 实际生效的比例可能被边界截断，要用它算补偿，否则会漂移
+    const real = next / s.zoom
+    const ox = cx - viewW / 2
+    const oy = cy - viewH / 2
+    return {
+      zoom: next,
+      panX: s.panX + ox * (1 - real),
+      panY: s.panY + oy * (1 - real),
+    }
+  }),
   setShowOriginal: (showOriginal) => set({ showOriginal }),
 }))
 
