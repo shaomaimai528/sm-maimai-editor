@@ -226,30 +226,64 @@ async function testCustomChannel(cfg: UserChannelConfig): Promise<string> {
     headers[cfg.authHeader || 'Authorization'] = `${cfg.authPrefix ?? ''}${key}`
   }
 
+  const full = `${base}${path}`
+
   try {
-    const resp = await fetch(`${base}${path}`, {
+    const resp = await fetch(full, {
       method: 'POST',
       headers,
       body: JSON.stringify({}),
       signal: AbortSignal.timeout(15000),
     })
-    // 只要拿到 HTTP 响应就说明地址可达、CORS 放行
+    // 拿到 HTTP 响应 = 地址可达 + CORS 放行 + TLS 正常
     if (resp.status === 401 || resp.status === 403) {
-      return `地址可达，但鉴权被拒（HTTP ${resp.status}），请检查 Key`
+      return `✓ 连接正常，但鉴权被拒（HTTP ${resp.status}）—— 请检查 API Key`
     }
     if (resp.status === 404) {
-      return `地址可达，但路径不存在（404），请检查提交路径`
+      return `✓ 地址可达，但路径不存在（404）—— 请检查提交路径「${cfg.submitPath}」`
     }
-    return `地址可达，接口已响应（HTTP ${resp.status}）`
+    if (resp.status === 400 || resp.status === 422) {
+      return `✓ 连接正常，服务已响应（HTTP ${resp.status}）—— 空请求被拒属正常`
+    }
+    return `✓ 连接正常（HTTP ${resp.status}）`
   } catch (e) {
     const msg = (e as Error)?.message || ''
-    if (/failed to fetch|network|load failed/i.test(msg)) {
-      throw new Error('地址不可达，或该服务未开放跨域（CORS）')
+    if (/abort|timeout/i.test(msg)) {
+      throw new Error(`请求超时 —— ${full} 无响应，可能地址错误或服务已下线`)
     }
-    if (/timeout|abort/i.test(msg)) {
-      throw new Error('请求超时，地址可能不可达')
+    if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+      // 浏览器把 DNS/TLS/CORS 三种情况都报成同一句话，这里分别探测
+      const cause = await probeCause(base)
+      throw new Error(cause)
     }
     throw new Error(msg || '测试失败')
+  }
+}
+
+/**
+ * "Failed to fetch" 有三种截然不同的原因，浏览器不区分。
+ * 用一个 no-cors 的探测请求 + 图片加载来区分它们。
+ */
+async function probeCause(base: string): Promise<string> {
+  const host = (() => { try { return new URL(base).host } catch { return base } })()
+
+  // no-cors 请求：能发出但不给读响应。若不抛错，说明 DNS/TLS 都通，只是缺 CORS 头
+  try {
+    await fetch(`${base}/favicon.ico`, { mode: 'no-cors', signal: AbortSignal.timeout(10000) })
+    return [
+      `✗ 服务器可达，但未开放跨域（CORS）`,
+      `  ${host} 拒绝了浏览器的跨域请求。`,
+      '  这是服务端配置问题，浏览器端无法绕过。',
+      '  解决：换一个支持 CORS 的接口，或让服务方加上 Access-Control-Allow-Origin',
+    ].join('\n')
+  } catch {
+    // 连 no-cors 都失败 —— DNS 解析不了，或 TLS 握手失败
+    return [
+      `✗ 无法连接到 ${host}`,
+      '  域名解析失败，或该地址没有可用的 HTTPS 证书。',
+      '  排查：浏览器直接打开该域名，能否正常访问？',
+      '  若打不开，说明地址填错了。',
+    ].join('\n')
   }
 }
 

@@ -169,7 +169,10 @@ export async function fetchJson(
   provider = 'AI'
 ): Promise<any> {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
-  const timer = controller ? setTimeout(() => { try { controller.abort() } catch {} }, timeoutMs) : null
+  let aborted = false
+  const timer = controller
+    ? setTimeout(() => { aborted = true; try { controller.abort() } catch {} }, timeoutMs)
+    : null
   try {
     const resp = await fetch(url, { ...init, signal: controller ? controller.signal : init.signal })
     const text = await resp.text()
@@ -181,8 +184,26 @@ export async function fetchJson(
       throw new AIError(`[${provider}] ${msg}`, { httpStatus: resp.status, body: json })
     }
     return json
+  } catch (e) {
+    // 浏览器在 fetch 层面失败时只给一句 "Failed to fetch"，
+    // 用户完全无从判断是地址写错、断网还是跨域被拦。这里翻译成人话。
+    if (e instanceof AIError) throw e
+    if (aborted) {
+      throw new AIError(`[${provider}] 请求超时（${Math.round(timeoutMs / 1000)} 秒无响应）`)
+    }
+    const msg = (e as Error)?.message || String(e)
+    if (/abort/i.test(msg)) {
+      throw new AIError(`[${provider}] 请求已取消`)
+    }
+    const host = (() => { try { return new URL(url).host } catch { return url } })()
+    throw new AIError(
+      `[${provider}] 无法连接 ${host}\n` +
+      '可能原因：地址写错／该服务未开放跨域（CORS）／网络不通。\n' +
+      '排查顺序：①浏览器直接打开该地址能否访问 ②用「测试连接」按钮看具体报错',
+    )
   } finally {
     if (timer) clearTimeout(timer)
+    void aborted
   }
 }
 
