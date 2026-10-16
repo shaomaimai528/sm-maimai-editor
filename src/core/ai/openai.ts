@@ -14,7 +14,7 @@
 
 import type { Provider, SubmitRequest, SubmitOutcome, PollResult, Balance } from './types'
 import { AIError } from './types'
-import { fetchJson, extractImageUrl, extractMessage, tryEach, dataUrlToBlob } from './extract'
+import { fetchJson, extractImageUrl, extractBase64Image, extractMessage, tryEach, dataUrlToBlob } from './extract'
 
 async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Promise<SubmitOutcome> {
   const { prompt, imageDataUrl, model } = req
@@ -40,8 +40,13 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
     })
   }
 
-  // 路径 2：文生图（generations）—— 已验证存在
-  attempts.push(async () => {
+  // 路径 2：文生图 / 图生图（generations）—— 已验证存在
+  //
+  // 这里显式要 b64_json：很多中转会把结果图丢到没开跨域的对象存储上，
+  // 浏览器读不到那种响应，表现为「生成成功但取不回图」。
+  // 要成 base64 就彻底绕开这个问题，代价只是响应体大一些。
+  // 不支持该参数的站点会忽略它并照常返回 url，所以不必做兼容分支。
+  const generate = (withImage: boolean) => async () => {
     const res = await fetchJson(`${baseUrl}/v1/images/generations`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -50,12 +55,18 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
         prompt,
         n: 1,
         size: req.aspectRatio && req.aspectRatio !== 'auto' ? req.aspectRatio : '1024x1024',
+        response_format: 'b64_json',
+        ...(withImage && imageDataUrl ? { image: imageDataUrl } : {}),
       }),
     }, 180_000, 'OpenAI')
-    const url = extractImageUrl(res)
-    if (!url) throw new AIError(extractMessage(res) || '未返回图片地址')
-    return { kind: 'image', imageUrl: url } as SubmitOutcome
-  })
+    const img = extractImageUrl(res) || extractBase64Image(res)
+    if (!img) throw new AIError(extractMessage(res) || '未返回图片')
+    return { kind: 'image', imageUrl: img } as SubmitOutcome
+  }
+
+  // 带原图能拿到更贴合的结果，所以优先试；被拒则退回纯文生图
+  if (imageDataUrl) attempts.push(generate(true))
+  attempts.push(generate(false))
 
   return tryEach(attempts, (i, e) => console.warn('[OpenAI] 变体失败', i, (e as Error)?.message))
 }

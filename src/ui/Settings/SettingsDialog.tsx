@@ -93,8 +93,9 @@ export function SettingsDialog({ open, onClose, settings, onChange }: Props) {
             onChange={(e) => onChange({ ...settings, imageProxy: e.target.value.trim() })}
           />
           <div className="settings-hint">
-            个别渠道生成的图片放在未开放跨域的图床上，直连取不回时会自动改用这里转发。
-            地址会被拼成「代理前缀/图片地址」。
+            一般不用填。应用已优先要求渠道直接返回内嵌图片，绝大多数情况够用。
+            万一仍取不回图，再在这里填一个转发地址兜底，格式为「代理前缀?url=图片地址」。
+            部署脚本见仓库 proxy 目录。
           </div>
         </div>
 

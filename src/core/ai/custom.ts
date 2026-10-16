@@ -66,6 +66,9 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
     if (req.imageDataUrl) body[s.imageField!] = req.imageDataUrl
     if (req.aspectRatio && req.aspectRatio !== 'auto') body.aspect_ratio = req.aspectRatio
     if (req.resolution) body.resolution = req.resolution
+    // 主动要 base64，绕开没开跨域的图床。
+    // 不认这个参数的站点会忽略它并照常返回 url，所以默认打开没有副作用。
+    if (s.base64First !== false) body.response_format = 'b64_json'
     if (req.extra?.customBody && typeof req.extra.customBody === 'object') {
       Object.assign(body, req.extra.customBody as object)
     }

@@ -128,12 +128,12 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
 }
 
 /**
- * 可选的图片代理前缀
+ * 可选的图片代理前缀（兜底用）
  *
- * 有的渠道生成正常，但把结果放在不带跨域头的对象存储上
- * （实测 aipais 的图片在 disk.aipais.de，浏览器取不回来）。
- * 这里允许用户自建一个转发（如 Cloudflare Worker）来兜底：
- * 配置后仅当直连失败才走代理，不影响本来就正常的渠道。
+ * 主策略是提交时就要 base64，让图片内嵌返回，
+ * 这样根本不碰对方的图床，也就没有跨域问题。
+ * 但仍有站点既不认 b64_json、图床又不给跨域头，此时用这里兜底。
+ * 仅当直连失败才走代理，不影响本来就正常的渠道。
  */
 let imageProxyPrefix = ''
 
@@ -161,7 +161,7 @@ export async function fetchResultBitmap(url: string): Promise<ImageBitmap> {
     // 直连失败（多半是对方图床没开跨域），尝试代理
     if (imageProxyPrefix) {
       try {
-        const proxied = `${imageProxyPrefix}/${url}`
+        const proxied = `${imageProxyPrefix}?url=${encodeURIComponent(url)}`
         const resp = await fetch(proxied)
         if (resp.ok) return createImageBitmap(await resp.blob())
       } catch {

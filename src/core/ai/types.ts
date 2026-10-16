@@ -20,6 +20,14 @@ export interface CustomSpec {
   taskIdField?: string
   /** 是否把图片以 dataURL 形式内嵌进 JSON（false 则用 multipart 表单） */
   imageAsDataUrl?: boolean
+  /**
+   * 是否要求对方以 base64 返回图片，默认 true
+   *
+   * 很多中转把结果图放在没开跨域的对象存储上，浏览器读不到，
+   * 表现是「生成成功但取不回图」。要成 base64 就绕开了这个问题。
+   * 不认该参数的站点会忽略它并照常返回 url，所以默认打开无副作用。
+   */
+  base64First?: boolean
   /** 鉴权头名称，默认 Authorization */
   authHeader?: string
   /** 鉴权值前缀，默认 "Bearer " */
