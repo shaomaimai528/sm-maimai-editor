@@ -80,6 +80,24 @@ export function SettingsDialog({ open, onClose, settings, onChange }: Props) {
           API Key 只保存在本机浏览器，不会上传到任何服务器
         </div>
 
+        {/* 结果图代理：应对少数渠道的图床没有跨域头 */}
+        <div className="settings-row">
+          <div className="settings-row-head">
+            <span className="settings-channel">图片代理</span>
+            {settings.imageProxy && <CheckCircle2 size={16} color="var(--c-accent)" />}
+          </div>
+          <input
+            className="settings-input"
+            value={settings.imageProxy}
+            placeholder="可选，如 https://你的worker.workers.dev"
+            onChange={(e) => onChange({ ...settings, imageProxy: e.target.value.trim() })}
+          />
+          <div className="settings-hint">
+            个别渠道生成的图片放在未开放跨域的图床上，直连取不回时会自动改用这里转发。
+            地址会被拼成「代理前缀/图片地址」。
+          </div>
+        </div>
+
         {[...CHANNELS, ...settings.userChannels.map(ucToChannel)].map((ch) => {
           const key = getKeyFor(settings, ch.id)
           const masked = key ? `${key.slice(0, 6)}••••${key.slice(-4)}` : ''

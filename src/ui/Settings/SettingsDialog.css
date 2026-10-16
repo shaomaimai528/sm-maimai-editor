@@ -75,3 +75,10 @@
 
 .settings-io { display: flex; gap: 8px; }
 .settings-import { display: flex; flex-direction: column; gap: 8px; animation: enter-rise var(--dur-base) var(--ease-out) both; }
+
+.settings-hint {
+  font-size: 11.5px;
+  color: var(--c-ink-40);
+  line-height: 1.5;
+  margin-top: 6px;
+}

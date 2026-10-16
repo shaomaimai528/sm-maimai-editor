@@ -10,6 +10,7 @@ import { AdjustDialog } from '../ui/Adjust/AdjustDialog'
 import { Button } from '../ui/primitives/Button'
 import { useEditor } from '../state/editorStore'
 import { loadSettings, saveSettings, getKeyFor, type AppSettings, DEFAULT_SETTINGS } from '../state/settings'
+import { setImageProxy } from '../core/ai/pipeline'
 import { setUserChannels, makeCustomChannel, getChannel } from '../core/ai/channels'
 import { loadImageFile } from '../core/render/load'
 import { renderDoc } from '../core/render/pipeline'
@@ -59,9 +60,16 @@ export function App() {
     loadSettings().then((s) => {
       setSettings(s)
       setUserChannels(toChannels(s))
+      // 结果图代理需要尽早生效，否则取图时才设就晚了
+      setImageProxy(s.imageProxy || '')
       setSettingsLoaded(true)
     })
   }, [])
+
+  // 设置里改了代理地址要立刻生效，不必重开应用
+  useEffect(() => {
+    setImageProxy(settings.imageProxy || '')
+  }, [settings.imageProxy])
 
   // 用户自建渠道变化时同步到渠道注册表，让 AI 面板能立刻看到
   useEffect(() => {

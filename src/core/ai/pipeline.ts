@@ -127,12 +127,54 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
   throw lastErr instanceof Error ? lastErr : new AIError('全部渠道地址均失败')
 }
 
-/** 下载生成结果为 ImageBitmap */
+/**
+ * 可选的图片代理前缀
+ *
+ * 有的渠道生成正常，但把结果放在不带跨域头的对象存储上
+ * （实测 aipais 的图片在 disk.aipais.de，浏览器取不回来）。
+ * 这里允许用户自建一个转发（如 Cloudflare Worker）来兜底：
+ * 配置后仅当直连失败才走代理，不影响本来就正常的渠道。
+ */
+let imageProxyPrefix = ''
+
+export function setImageProxy(prefix: string) {
+  imageProxyPrefix = (prefix || '').trim().replace(/\/+$/, '')
+}
+
+export function getImageProxy(): string {
+  return imageProxyPrefix
+}
+
+/** 下载生成结果为 ImageBitmap，直连失败时按配置回退代理 */
 export async function fetchResultBitmap(url: string): Promise<ImageBitmap> {
-  const resp = await fetch(url)
-  if (!resp.ok) throw new AIError(`下载结果失败 HTTP ${resp.status}`)
-  const blob = await resp.blob()
-  return createImageBitmap(blob)
+  // data: 与 blob: 是本地产物，直接解码即可，不走网络
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    const blob = await (await fetch(url)).blob()
+    return createImageBitmap(blob)
+  }
+
+  try {
+    const resp = await fetch(url)
+    if (!resp.ok) throw new AIError(`HTTP ${resp.status}`)
+    return createImageBitmap(await resp.blob())
+  } catch (direct) {
+    // 直连失败（多半是对方图床没开跨域），尝试代理
+    if (imageProxyPrefix) {
+      try {
+        const proxied = `${imageProxyPrefix}/${url}`
+        const resp = await fetch(proxied)
+        if (resp.ok) return createImageBitmap(await resp.blob())
+      } catch {
+        // 落到下面统一报错
+      }
+    }
+    const host = (() => { try { return new URL(url).host } catch { return url } })()
+    throw new AIError(
+      `结果图下载失败（${host}）\n` +
+      '该图片所在域名未开放跨域访问，浏览器无法直接取回。\n' +
+      '解决办法：在设置里填写「图片代理」地址（如自建的 Cloudflare Worker）。',
+    )
+  }
 }
 
 /**

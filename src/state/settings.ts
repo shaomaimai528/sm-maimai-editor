@@ -59,6 +59,13 @@ export interface AppSettings {
   savedWorkflows: SavedWorkflow[]
   /** 当前选中的工作流 ID */
   activeWorkflowId: string
+
+  /**
+   * 结果图代理前缀（可选）
+   * 部分渠道生成的图片放在不带跨域头的图床上，浏览器取不回来。
+   * 填一个自建转发地址即可兜底，留空则只用直连。
+   */
+  imageProxy: string
 }
 
 /** 用户保存的 RunningHub 工作流 */
@@ -124,6 +131,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   rememberLastChannel: true,
   savedWorkflows: [],
   activeWorkflowId: '',
+  /**
+   * 结果图代理前缀（可选）
+   * 部分渠道生成的图片放在不带跨域头的图床上，浏览器取不回来。
+   * 填一个自建转发地址即可兜底，留空则只用直连。
+   */
+  imageProxy: '',
 }
 
 const KEY = 'app-settings-v1'
