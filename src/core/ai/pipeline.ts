@@ -56,10 +56,22 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
 
       const req: SubmitRequest = { ...request }
 
-      // RunningHub 需要先上传图片换取 file token
-      if (provider.upload && channel.needsUpload && req.imageDataUrl && !req.fileToken) {
+      /**
+       * RunningHub 需要先上传图片换取 file token
+       *
+       * 注意这里判断的是"这个渠道需不需要上传"，而不是"手上有没有 dataURL"。
+       * 之前写成 `req.imageDataUrl &&` 导致上传被整段跳过：
+       * AIDialog 对 RunningHub 有意不生成 dataURL（图片走 nodeInfoList 提交，
+       * 多传一份 base64 纯属浪费），于是条件永假 —— 图片永远上传不了，
+       * submit 里拿不到 token 只能报"图片没有上传成功"。
+       * 需要上传时缺图属于错误，应当让 provider 明确报出来，而不是静默跳过。
+       */
+      if (provider.upload && channel.needsUpload && !req.fileToken) {
+        if (!req.imageDataUrl && !req.sourceBlob) {
+          throw new AIError('该渠道需要先上传图片，但本次没有可用的图片数据')
+        }
         onProgress?.({ phase: '上传图片', elapsedMs: Date.now() - started, attempt: 0 })
-        const blob = dataUrlToBlob(req.imageDataUrl)
+        const blob = req.sourceBlob || dataUrlToBlob(req.imageDataUrl!)
         req.fileToken = await provider.upload(blob, apiKey, baseUrl)
       }
 

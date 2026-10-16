@@ -11,7 +11,7 @@ import { allChannels, getChannel } from '../../core/ai/channels'
 import { generate, fetchResultBitmap, fetchModels } from '../../core/ai/pipeline'
 import { AIError } from '../../core/ai/types'
 import {
-  contextBounds, cropForAI, composeResult, selectionBounds,
+  contextBounds, cropForAI, composeResult, selectionBounds, bitmapToBlob,
   type ContextBox,
 } from '../../core/render/pasteback'
 import { createLayer } from '../../core/doc/document'
@@ -107,6 +107,13 @@ export function AIDialog({
     () => (selection ? selectionBounds(selection) : null),
     [selection]
   )
+  /**
+   * 是否是 RunningHub 渠道
+   *
+   * 提到组件级：渲染与提交都要用，而且判断依据只有渠道家族这一个。
+   * 之前它只在 handleGenerate 内部定义，导致 JSX 里无法据此隐藏通用提示词框。
+   */
+  const isRH = channel?.family === 'runninghub'
 
   /**
    * 当前预览位的所有权标记
@@ -224,7 +231,6 @@ export function AIDialog({
 
     // RunningHub 必须先拿到工作流参数才允许提交 ——
     // 参数没读到就提交，等于用错的工作流盲跑，会白扣算力
-    const isRH = channel?.family === 'runninghub'
     if (isRH && !wfInfo) {
       setError(wfLoading ? '正在读取工作流参数，请稍候' : (wfError || '请先选择工作流'))
       return
@@ -245,9 +251,18 @@ export function AIDialog({
       // 只有走 OpenAI 兼容协议的渠道才需要裁切 + 传 dataURL。
       setPhase('准备素材')
       let imageDataUrl: string | undefined
+      /**
+       * RunningHub 走这条：直接把整张原图编码成 Blob 交给上传步骤。
+       *
+       * 之前这里什么都不给（只设了 box），而上传条件又依赖 imageDataUrl，
+       * 于是图片永远传不上去 —— 用户看到的就是"上传不成功、任务跑不了"。
+       * 现在明确给出待上传的图，不再依赖那条脆弱的隐式前提。
+       */
+      let sourceBlob: Blob | undefined
       let box: ContextBox
       if (isRH) {
         box = { x: 0, y: 0, w: doc.width, h: doc.height }
+        sourceBlob = await bitmapToBlob(sourceBitmap)
       } else {
         box = contextBounds(selBounds, doc.width, doc.height)
         imageDataUrl = (await cropForAI(sourceBitmap, box)).dataUrl
@@ -270,6 +285,7 @@ export function AIDialog({
           // RunningHub 的提示词由 nodeInfoList 承载，这里不重复传
           prompt: isRH ? '' : prompt.trim(),
           imageDataUrl,
+          sourceBlob,
           model: settings.activeModel || channel.defaultModel || channel.imageModels[0] || '',
           aspectRatio: settings.aspectRatio,
           resolution: settings.resolution,
@@ -448,22 +464,32 @@ export function AIDialog({
           </div>
         )}
 
-        {/* 提示词 */}
-        <div className="ai-field">
-          <label className="ai-label">提示词</label>
-          <textarea
-            className="ai-textarea"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="描述你希望选区内变成什么样"
-            rows={3}
-          />
-          <div className="ai-presets">
-            {PRESETS.map((p) => (
-              <button key={p} className="ai-chip" onClick={() => setPrompt(p)}>{p}</button>
-            ))}
+        {/*
+          提示词输入框
+
+          RunningHub 不显示这一块：它的提示词属于工作流自己的参数，
+          上面「工作流参数」里已经有一项（带「编辑指令」标记）在管这件事。
+          两处都能填同一个值，用户会不知道该填哪个 ——
+          更糟的是很容易以为下面这个才是生效的那个，填完却发现没反应。
+          所以对 RunningHub 只保留工作流参数这一条路径。
+        */}
+        {!isRH && (
+          <div className="ai-field">
+            <label className="ai-label">提示词</label>
+            <textarea
+              className="ai-textarea"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="描述你希望选区内变成什么样"
+              rows={3}
+            />
+            <div className="ai-presets">
+              {PRESETS.map((p) => (
+                <button key={p} className="ai-chip" onClick={() => setPrompt(p)}>{p}</button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 错误 */}
         {error && (

@@ -64,6 +64,15 @@ export interface SubmitRequest {
   prompt: string
   /** 图片的 base64 dataURL（图生图用），可选 */
   imageDataUrl?: string
+  /**
+   * 待上传的图片本体
+   *
+   * 需要上传（needsUpload）的渠道直接给 Blob 更省事：
+   * 走 dataURL 要先编码成 base64 再解码回来，一张 4K 图白耗上百毫秒与两倍内存，
+   * 而这类渠道根本不需要 dataURL。
+   * 与 imageDataUrl 二者给其一即可。
+   */
+  sourceBlob?: Blob
   /** 已上传得到的 file token（RunningHub 用） */
   fileToken?: string
   model: string

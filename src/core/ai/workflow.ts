@@ -39,12 +39,22 @@ export interface WorkflowInfo {
   name: string
   description?: string
   coverUrl?: string
+  /** 全部封面图，用于工作流卡片画廊 */
+  covers?: string[]
   params: WorkflowParam[]
   /** 历史成功率（百分比字符串） */
   successRate?: string
   /** 平均耗时（秒） */
   avgSeconds?: string
   tags?: string[]
+  /** 作者，来自 owner 字段 */
+  author?: string
+  /** 累计运行次数 */
+  runCount?: string
+  /** 发布时间 */
+  publishedAt?: string
+  /** 应用是否可用（webappState / workflowState 都为 1 才算正常） */
+  available?: boolean
 }
 
 /** fieldData 里标记为图片上传的字段 */
@@ -68,17 +78,20 @@ function toParams(nodes: any[]): WorkflowParam[] {
   })).filter((p) => p.nodeId && p.fieldName)
 }
 
-/** 从封面数组里取第一张 */
-function firstCover(d: any): string | undefined {
+/** 把封面数组规整成 URL 列表 */
+function coverList(d: any): string[] {
+  const out: string[] = []
   for (const k of ['covers', 'chineseCovers', 'englishCovers']) {
     const arr = d?.[k]
-    if (Array.isArray(arr) && arr.length) {
-      const c = arr[0]
+    if (!Array.isArray(arr)) continue
+    for (const c of arr) {
       const url = typeof c === 'string' ? c : (c?.url || c?.coverUrl || c?.imageUrl)
-      if (url) return String(url)
+      if (url && !out.includes(String(url))) out.push(String(url))
     }
+    // 优先用主 covers，拿到了就不必再收其他语言版本
+    if (out.length) break
   }
-  return undefined
+  return out
 }
 
 /**
@@ -130,6 +143,7 @@ export async function fetchWorkflow(
 
   const d = res.data
   const params = toParams(d.inputNodes)
+  const covers = coverList(d)
 
   return {
     webappId: String(d.id ?? id),
@@ -140,11 +154,35 @@ export async function fetchWorkflow(
     description: typeof d.description === 'string'
       ? d.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
       : undefined,
-    coverUrl: firstCover(d),
+    coverUrl: covers[0],
+    covers,
     params,
     successRate: d.runningSuccessRate != null ? String(d.runningSuccessRate) : undefined,
     avgSeconds: d.avgRunningSeconds != null ? String(d.avgRunningSeconds) : undefined,
     tags: Array.isArray(d.tags) ? d.tags.map((t: any) => t?.name).filter(Boolean) : undefined,
+    author: d.owner?.name || d.owner?.nickName || d.owner?.userName || undefined,
+    /**
+     * 运行次数藏在 statisticsInfo 里，字段名各版本不一致，逐个兜底。
+     * 拿不到就不显示，不要编一个数字出来。
+     */
+    runCount: (() => {
+      const s = d.statisticsInfo || {}
+      const v = s.runCount ?? s.runningCount ?? s.useCount ?? s.totalRunCount ?? s.viewCount
+      return v == null ? undefined : String(v)
+    })(),
+    publishedAt: typeof d.publishTime === 'string'
+      ? d.publishTime.slice(0, 10)
+      : undefined,
+    /**
+     * 应用是否可用
+     *
+     * 只认 webappState，不看 workflowState。
+     * workflowState 并不可靠：同一个工作流，从 Node 直接请求返回 1，
+     * 从浏览器请求却返回 0 —— 而它明明能正常出图（已实测跑通）。
+     * 按它判断会把好用的工作流标成"已下架"，吓得用户不敢点。
+     * 宁可漏报也不要误报：误报会直接挡住用户干活。
+     */
+    available: d.webappState === 1,
   }
 }
 

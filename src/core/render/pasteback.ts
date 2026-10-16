@@ -43,6 +43,25 @@ export function contextBounds(
   return { x, y, w: Math.max(1, w), h: Math.max(1, h) }
 }
 
+/**
+ * 把位图编码成待上传的 Blob
+ *
+ * 给"需要先上传再提交"的渠道用（RunningHub）。
+ * 直接用 PNG 无损编码：这类工作流后续会自己做预处理，
+ * 提前压成 JPEG 只会白白掉一次画质。
+ */
+export async function bitmapToBlob(bitmap: ImageBitmap, maxEdge = 2048): Promise<Blob> {
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(1, Math.round(bitmap.width * scale))
+  const h = Math.max(1, Math.round(bitmap.height * scale))
+  const canvas = new OffscreenCanvas(w, h)
+  const ctx = canvas.getContext('2d')!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, 0, 0, w, h)
+  return canvas.convertToBlob({ type: 'image/png' })
+}
+
 /** 从源图裁出上下文区域，并等比缩放到模型友好尺寸，返回 dataURL */
 export async function cropForAI(
   source: ImageBitmap,
