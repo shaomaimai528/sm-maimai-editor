@@ -25,6 +25,9 @@ import './App.css'
  */
 const EXPORT_MAX_PIXELS = 40_000_000
 
+/** 当前打开的底部面板；null 表示都关着（同一时刻只允许一个） */
+type PanelId = 'ai' | 'settings' | 'layers' | 'adjust' | 'canvas' | null
+
 /** 把持久化的用户渠道配置转成运行时 Channel */
 function toChannels(s: AppSettings) {
   return (s.userChannels || []).map((uc) =>
@@ -52,12 +55,19 @@ function toChannels(s: AppSettings) {
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
-  const [showAI, setShowAI] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [showLayers, setShowLayers] = useState(false)
-  const [showAdjust, setShowAdjust] = useState(false)
-  const [showCanvas, setShowCanvas] = useState(false)
+  /**
+   * 面板开关
+   *
+   * 全部收在一个状态里，保证"同时只有一个面板"。
+   * 早期每个面板各管各的布尔量，于是点完「图层」再点「调整」
+   * 会出现两个 peek 面板在底部叠罗汉，画布被压掉两倍高度，
+   * 而且两个都没有关闭按钮，用户只能刷新页面。
+   */
+  const [panel, setPanel] = useState<PanelId>(null)
   const [toast, setToast] = useState('')
+
+  const openPanel = useCallback((id: Exclude<PanelId, null>) => setPanel(id), [])
+  const closePanel = useCallback(() => setPanel(null), [])
 
   const fileRef = useRef<HTMLInputElement>(null)
   const doc = useEditor((s) => s.doc)
@@ -242,28 +252,25 @@ export function App() {
       {doc && <Toolbar
         onPickImage={() => fileRef.current?.click()}
         onExport={handleExport}
-        onOpenSettings={() => setShowSettings(true)}
-        onOpenLayers={() => setShowLayers(true)}
-        onOpenAI={() => setShowAI(true)}
-        onOpenAdjust={() => setShowAdjust(true)}
-        onOpenCanvas={() => setShowCanvas(true)}
+        onOpenSettings={() => openPanel('settings')}
+        onOpenLayers={() => openPanel('layers')}
+        onOpenAI={() => openPanel('ai')}
+        onOpenAdjust={() => openPanel('adjust')}
+        onOpenCanvas={() => openPanel('canvas')}
       />}
 
       <AIDialog
-        open={showAI}
-        onClose={() => setShowAI(false)}
+        open={panel === 'ai'}
+        onClose={closePanel}
         settings={settings}
         apiKey={apiKey}
         onNeedKey={(id) => {
           showToast('请先在设置中填写该渠道的 API Key')
-          setShowSettings(true)
+          openPanel('settings')
         }}
         onPickChannel={handlePickChannel}
         onPickModel={handlePickModel}
-        onAddChannel={() => {
-          setShowAI(false)
-          setShowSettings(true)
-        }}
+        onAddChannel={() => openPanel('settings')}
         savedWorkflows={settings.savedWorkflows}
         onPickWorkflow={handlePickWorkflow}
         onSaveWorkflow={handleSaveWorkflow}
@@ -272,15 +279,15 @@ export function App() {
       />
 
       <SettingsDialog
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
+        open={panel === 'settings'}
+        onClose={closePanel}
         settings={settings}
         onChange={persist}
       />
 
-      <LayersDialog open={showLayers} onClose={() => setShowLayers(false)} />
-      <AdjustDialog open={showAdjust} onClose={() => setShowAdjust(false)} />
-      <CanvasDialog open={showCanvas} onClose={() => setShowCanvas(false)} />
+      <LayersDialog open={panel === 'layers'} onClose={closePanel} />
+      <AdjustDialog open={panel === 'adjust'} onClose={closePanel} />
+      <CanvasDialog open={panel === 'canvas'} onClose={closePanel} />
 
       {toast && <div className="toast">{toast}</div>}
 

@@ -50,6 +50,25 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${b}${p}`
 }
 
+/**
+ * 待轮询任务的协议快照
+ *
+ * 轮询接口只拿到 taskId，拿不到当初提交时用的 CustomSpec，
+ * 而轮询路径与字段名全在 spec 里。
+ *
+ * 早期实现是从 globalThis.__customPollSpec 读 —— 但那个变量**从来没有被写入过**
+ * （全仓库只有这一处读取），于是 pollPath 恒为空，
+ * 所有「返回任务号需轮询」的自定义渠道一律直接失败，报「未配置轮询路径」。
+ * 这里改为在提交时按 taskId 登记一份 spec，轮询时取回，用完即删。
+ * 用 Map 而不是全局单例：并发任务各存各的，不会互相覆盖。
+ */
+const pollSpecs = new Map<string, CustomSpec>()
+
+/** 任务结束后回收登记，避免长期运行把 Map 撑大 */
+function forgetPollSpec(taskId: string) {
+  pollSpecs.delete(taskId)
+}
+
 async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Promise<SubmitOutcome> {
   const s = spec(req)
   const url = joinUrl(baseUrl, s.submitPath!)
@@ -97,25 +116,35 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
       if (imgUrl) return { kind: 'image', imageUrl: imgUrl }
       throw new AIError(extractMessage(res) || '未返回任务号，且未找到图片地址')
     }
+    // 登记本次任务的协议快照，poll 时按 taskId 取回
+    pollSpecs.set(taskId, s)
+    // 兜底回收：即使轮询从未被调用（如用户中途关闭），也不会永久占着内存
+    setTimeout(() => forgetPollSpec(taskId), 30 * 60 * 1000)
     return { kind: 'task', taskId }
   }
 
   // 同步模式：优先认图片
   if (imgUrl) return { kind: 'image', imageUrl: imgUrl }
-  if (taskId) return { kind: 'task', taskId }
+  if (taskId) {
+    pollSpecs.set(taskId, s)
+    setTimeout(() => forgetPollSpec(taskId), 30 * 60 * 1000)
+    return { kind: 'task', taskId }
+  }
   throw new AIError(extractMessage(res) || '未返回图片地址')
 }
 
 async function poll(taskId: string, apiKey: string, baseUrl: string): Promise<PollResult> {
-  // 轮询需要知道路径与字段名，这里从调用方经 globalThis 传递（pipeline 会注入）
-  const s: CustomSpec = (globalThis as any).__customPollSpec || {}
+  // 取不到登记（例如页面刷新后重试）时给一份空 spec，下面会明确报"未配置轮询路径"
+  const s: Partial<CustomSpec> = pollSpecs.get(taskId) || {}
   const pollPath = s.pollPath?.trim()
   if (!pollPath) {
-    return { status: 'failed', message: '未配置轮询路径' }
+    return { status: 'failed', message: '未配置轮询路径（请在该自定义渠道里填写轮询路径）' }
   }
 
+  // spec 可能只有部分字段（旧配置导入的），这里补全后再交给 buildHeaders
   const headers = buildHeaders(apiKey, {
-    ...s,
+    mode: s.mode || 'poll',
+    submitPath: s.submitPath || '',
     authHeader: s.authHeader || 'Authorization',
     authPrefix: s.authPrefix ?? 'Bearer ',
     extraHeaders: s.extraHeaders || {},
@@ -132,10 +161,15 @@ async function poll(taskId: string, apiKey: string, baseUrl: string): Promise<Po
   const imgUrl = extractImageUrl(res) || extractBase64Image(res)
 
   if (status === 'failed') {
+    forgetPollSpec(taskId)
     return { status: 'failed', message: extractMessage(res) || '任务执行失败' }
   }
-  if (imgUrl) return { status: 'done', imageUrl: imgUrl }
+  if (imgUrl) {
+    forgetPollSpec(taskId)
+    return { status: 'done', imageUrl: imgUrl }
+  }
   if (status === 'success') {
+    forgetPollSpec(taskId)
     return { status: 'failed', message: '任务已完成但未找到结果图片' }
   }
   return { status: 'pending' }

@@ -37,9 +37,27 @@ export function SettingsDialog({ open, onClose, settings, onChange }: Props) {
   }
 
   const checkBalance = async (channelId: string) => {
-    const ch = CHANNELS.find((c) => c.id === channelId)!
+    /**
+     * 渠道既可能在内置表里，也可能是用户自建
+     *
+     * 早期只查 CHANNELS 并用了非空断言，列表里渲染的却是
+     * [...CHANNELS, ...userChannels] —— 点自定义渠道的「查额度」时
+     * find 返回 undefined，断言让它带着一个空对象继续跑，
+     * queryBalance 里读 family 就抛异常，整个面板白屏。
+     */
+    const builtin = CHANNELS.find((c) => c.id === channelId)
+    const user = settings.userChannels.find((u) => u.id === channelId)
+    const ch = builtin || (user ? ucToChannel(user) : undefined)
+    if (!ch) {
+      setBalanceMsg((m) => ({ ...m, [channelId]: '渠道不存在' }))
+      return
+    }
+
     const key = getKeyFor(settings, channelId)
-    if (!key) return
+    if (!key) {
+      setBalanceMsg((m) => ({ ...m, [channelId]: '请先填写 API Key' }))
+      return
+    }
     setBalanceMsg((m) => ({ ...m, [channelId]: '查询中' }))
     try {
       const b = await queryBalance(ch, key)

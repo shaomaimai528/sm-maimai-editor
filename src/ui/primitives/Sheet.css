@@ -80,11 +80,54 @@
   flex: 0 0 auto;
 }
 
+/* 标题行：左标题 + 右关闭按钮，关闭按钮固定在右上角 */
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 4px 20px;
+  flex: 0 0 auto;
+}
+
 .sheet-title {
   font-size: 16px;
   font-weight: 600;
-  padding: 8px 20px 4px;
+  flex: 1 1 auto;
+}
+
+/*
+  关闭按钮
+  peek 面板没有遮罩，这是唯一的显式出口 —— 少了它面板就关不掉。
+  做成 44px 的点击热区（视觉上是 30px 的圆），符合移动端最小可点尺寸。
+*/
+.sheet-close {
   flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--r-full);
+  background: var(--c-ink-6, rgba(10, 10, 10, 0.06));
+  color: var(--c-ink-70, rgba(10, 10, 10, 0.7));
+  cursor: pointer;
+  position: relative;
+  transition: background-color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+/* 扩到 44x44 的不可见热区，便于手指点中 */
+.sheet-close::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+.sheet-close:hover { background: var(--c-ink-12, rgba(10, 10, 10, 0.12)); }
+.sheet-close:active { transform: scale(0.9); }
+.sheet-close:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
 }
 
 .sheet-body {

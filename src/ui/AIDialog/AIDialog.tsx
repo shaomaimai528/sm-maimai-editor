@@ -24,7 +24,7 @@ import { WorkflowParams } from './WorkflowParams'
 import { WorkflowPicker } from './WorkflowPicker'
 import type { SavedWorkflow } from '../../state/settings'
 import { defaultParamValues } from '../../core/ai/workflow'
-import type { AppSettings } from '../../state/settings'
+import { getKeyFor, type AppSettings } from '../../state/settings'
 import './AIDialog.css'
 
 interface Props {
@@ -375,7 +375,14 @@ export function AIDialog({
             onChange={(e) => {
               const id = e.target.value
               const c = getChannel(id)
-              onNeedKey(id)
+              /**
+               * 只在确实缺 Key 时才引导去设置
+               *
+               * 早期这里无条件调用 onNeedKey(id)，于是每换一次渠道
+               * 都会把设置面板弹出来盖住 AI 面板 —— 已经填过 Key 的渠道
+               * 也照弹不误，用户以为"换渠道就报错"。
+               */
+              if (!getKeyFor(settings, id)) onNeedKey(id)
               onPickChannel(id, c?.defaultModel || '')
             }}
           >

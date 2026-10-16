@@ -54,7 +54,9 @@ export async function renderDoc(
   const w = Math.max(1, Math.round(width))
   const h = Math.max(1, Math.round(height))
   const canvas = new OffscreenCanvas(w, h)
-  const ctx = canvas.getContext('2d')!
+  // 调整层与蒙版都要反复 getImageData / putImageData，
+  // 不声明 willReadFrequently 时浏览器默认走 GPU 回读，手机上明显掉帧
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
 
   for (const layer of doc.layers) {
     if (opts.skipHidden !== false && !layer.visible) continue
@@ -98,7 +100,7 @@ async function renderLayer(
 
   // 像素层：先画到临时画布，套用蒙版后再合成
   const tmp = new OffscreenCanvas(width, height)
-  const tctx = tmp.getContext('2d')!
+  const tctx = tmp.getContext('2d', { willReadFrequently: true })!
   tctx.imageSmoothingEnabled = true
   tctx.imageSmoothingQuality = 'high'
   tctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, width, height)

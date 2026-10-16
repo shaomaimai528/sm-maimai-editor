@@ -29,10 +29,12 @@ npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ±¾»úÃÜÔ¿£¬¾ø²»Èë¿â£¨Ê¾ÀıÎÄ¼ş local-keys.example.ts Òª±£Áô£©
+# â˜… æœ¬æœºçœŸå®å¯†é’¥ï¼ˆç¤ºä¾‹æ–‡ä»¶ local-keys.example.ts è¦ä¿ç•™ï¼‰
 src/core/ai/local-keys.ts
 
-# ÁÙÊ±Ì½²â½Å±¾£¨¿ÉÄÜº¬ÃÜÔ¿£¬ÓÀ²»Èë¿â£©
+# ä¸´æ—¶æ¢æµ‹è„šæœ¬ï¼ˆå¯èƒ½å«å¯†é’¥ï¼Œç»ä¸å…¥åº“ï¼‰
 .*.mjs
 .*.tmp.json
-.verify/
+
+# TypeScript å¢é‡æ„å»ºä¿¡æ¯
+*.tsbuildinfo

@@ -8,6 +8,18 @@
  *  1. 任何一次合成失败都不能把画面清空 —— 保留上一张成功的图
  *  2. 失败的调整层要能自动剔除后重试一次，让用户看到"图还在，只是那层没生效"
  *  3. 把失败原因暴露给界面，而不是闷在 console 里
+ *
+ * 位图所有权（崩溃事故的教训）：
+ *  这个 hook 会被多个组件同时使用（画布、图层面板各一份）。
+ *  早期每个实例各存一个 prevRef，谁更新就把自己上一张 close 掉 ——
+ *  但两张图可能指向同一个 ImageBitmap 对象，于是一方把另一方
+ *  正在绘制的位图 close 了，Konva 下一帧 drawImage 就抛
+ *  "The image source is detached"，整个画布直接黑掉。
+ *
+ *  现在改成：
+ *   - 每个实例只 close **自己创建** 的位图，绝不碰别人的
+ *   - 释放延后到"确认不再被绘制"之后，避免 React 提交与 Konva 绘制之间
+ *     那一帧的窗口期（同步 close 时正好落在这个窗口里）
  */
 import { useEffect, useRef, useState } from 'react'
 import type { Doc } from '../../core/doc/types'
@@ -72,11 +84,26 @@ function maskFingerprint(
   return fp
 }
 
+/**
+ * 延迟释放位图
+ *
+ * 直接 close 会撞上"React 已经 setState、Konva 还没重绘"的那一帧：
+ * 此刻 DOM 里挂着的仍是旧位图，一旦被释放就是 detached 崩溃。
+ * 放到下一个宏任务（此时本次绘制已结束）再关，就能稳定避开。
+ */
+function releaseLater(bitmap: ImageBitmap | null) {
+  if (!bitmap) return
+  setTimeout(() => {
+    try { bitmap.close?.() } catch { /* 已被释放或环境不支持，忽略 */ }
+  }, 0)
+}
+
 /** 生成文档的合成缩略快照，用于屏幕显示 */
 export function useComposedBitmap(doc: Doc | null): ComposedBitmap | null {
   const [state, setState] = useState<ComposedBitmap | null>(null)
   const rafRef = useRef<number | null>(null)
-  const prevRef = useRef<ImageBitmap | null>(null)
+  /** 本实例自己创建、且已经不再需要的位图（只关自己的，绝不碰别人的） */
+  const ownedRef = useRef<ImageBitmap | null>(null)
   /**
    * 已知会让渲染炸掉的图层
    * 记住它，下一次合成直接跳过，避免用户每拖一下滑杆就再崩一次
@@ -103,10 +130,13 @@ export function useComposedBitmap(doc: Doc | null): ComposedBitmap | null {
   useEffect(() => {
     if (!doc) {
       setState(null)
-      prevRef.current?.close?.()
-      prevRef.current = null
+      releaseLater(ownedRef.current)
+      ownedRef.current = null
       return
     }
+
+    // 已卸载就不再产出新图，避免 close 之后又被写入
+    let cancelled = false
 
     // 用 rAF 合并高频变更（拖滑杆时避免每帧都重算）
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -115,11 +145,22 @@ export function useComposedBitmap(doc: Doc | null): ComposedBitmap | null {
       const w = Math.max(1, Math.round(doc.width * scale))
       const h = Math.max(1, Math.round(doc.height * scale))
 
-      try {
-        const bitmap = await renderDoc(doc, w, h)
-        prevRef.current?.close?.()
-        prevRef.current = bitmap
+      /** 合成成功后交接：登记新图、释放本实例的旧图 */
+      const commit = (bitmap: ImageBitmap) => {
+        if (cancelled) {
+          // 本次结果已经没人要了，直接回收，别让它泄漏
+          releaseLater(bitmap)
+          return
+        }
+        const prev = ownedRef.current
+        ownedRef.current = bitmap
         setState({ bitmap, width: w, height: h, scale })
+        // 上一张图可能仍被 Konva 画着，延后一拍再释放
+        if (prev && prev !== bitmap) releaseLater(prev)
+      }
+
+      try {
+        commit(await renderDoc(doc, w, h))
         return
       } catch (e) {
         // 第一次失败：把出问题的图层记下来，剔除后重试一次
@@ -132,10 +173,7 @@ export function useComposedBitmap(doc: Doc | null): ComposedBitmap | null {
               ...doc,
               layers: doc.layers.filter((l) => l.id !== badId),
             }
-            const bitmap = await renderDoc(safeDoc, w, h)
-            prevRef.current?.close?.()
-            prevRef.current = bitmap
-            setState({ bitmap, width: w, height: h, scale })
+            commit(await renderDoc(safeDoc, w, h))
             return
           } catch (e2) {
             console.warn('[compose] 重试仍失败', e2)
@@ -152,8 +190,12 @@ export function useComposedBitmap(doc: Doc | null): ComposedBitmap | null {
     }
   }, [signature])
 
+  // 卸载时释放本实例持有的位图（延后一拍，确保最后一次绘制已经完成）
   useEffect(() => {
-    return () => { prevRef.current?.close?.() }
+    return () => {
+      releaseLater(ownedRef.current)
+      ownedRef.current = null
+    }
   }, [])
 
   return state

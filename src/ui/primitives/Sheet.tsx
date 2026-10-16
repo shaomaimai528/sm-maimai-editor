@@ -7,8 +7,15 @@
  *  - 'peek'非遮挡：只占一条高度、不铺遮罩、背景还能点，
  *    用于图层/调整这类"必须一边看画布一边调"的面板。
  *    修图时最忌讳面板把图挡死 —— 看不到图就等于没法调。
+ *
+ * 关闭方式（务必保持三条都可用）：
+ *  1. 右上角关闭按钮 —— peek 没有遮罩可点，这是它唯一的显式出口，
+ *     早期版本漏了这个按钮，面板一旦打开就再也关不掉
+ *  2. 点遮罩（仅 blocking）
+ *  3. Esc 键 —— 桌面端与带键盘的平板的习惯操作
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { X } from 'lucide-react'
 import { useEditor } from '../../state/editorStore'
 import './Sheet.css'
 
@@ -86,6 +93,27 @@ export function Sheet({ open, onClose, title, children, maxHeight = '70vh', vari
     return () => { document.body.style.overflow = prev }
   }, [open, variant])
 
+  /**
+   * Esc 关闭
+   *
+   * 只在最上层那一个面板上生效：多个面板同时开着时，
+   * 若每个都监听，一次 Esc 会把它们全部关掉，用户只是想去掉最上面那层。
+   * 用「最后打开的最先响应」判定，靠 DOM 顺序找出最靠后的 sheet。
+   */
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const roots = Array.from(document.querySelectorAll('.sheet-root'))
+      const mine = panelRef.current?.closest('.sheet-root')
+      if (!mine || roots[roots.length - 1] !== mine) return
+      e.stopPropagation()
+      onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   if (!visible) return null
 
   return (
@@ -98,9 +126,21 @@ export function Sheet({ open, onClose, title, children, maxHeight = '70vh', vari
         style={{ maxHeight }}
         role="dialog"
         aria-modal={variant === 'blocking'}
+        aria-label={title}
       >
         <div className="sheet-grip" />
-        {title && <div className="sheet-title">{title}</div>}
+        <div className="sheet-head">
+          {title ? <div className="sheet-title">{title}</div> : <span />}
+          {/*
+            显式关闭按钮
+            peek 变体没有遮罩可点，缺了它面板就永远关不掉；
+            blocking 变体虽然有遮罩，但手机上误触遮罩容易关错，
+            给一个明确的出口更稳妥。
+          */}
+          <button className="sheet-close" onClick={onClose} type="button" aria-label="关闭">
+            <X size={18} />
+          </button>
+        </div>
         <div className="sheet-body">{children}</div>
       </div>
     </div>
