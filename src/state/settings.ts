@@ -158,12 +158,17 @@ function seedPresets(s: AppSettings): AppSettings {
   const credentials: ChannelCredential[] = [...(s.credentials || [])]
   const lastModelByChannel: Record<string, string> = { ...(s.lastModelByChannel || {}) }
 
+  // 已导入过密钥的渠道 id，用来给没有内置 Key 的环境补上
+  const importedKeys = new Map(credentials.filter((c) => c.apiKey).map((c) => [c.channelId, c.apiKey]))
+
   for (const p of CHANNEL_PRESETS) {
-    if (!p.apiKey) continue
     const id = PRESET_ID_PREFIX + p.key
+    // 渠道条目本身始终要建出来，哪怕没有内置 Key。
+    // 否则公开部署的版本里这些渠道根本不存在，用户导出配置再导入也补不回来。
+    const seededKey = p.apiKey || importedKeys.get(id) || ''
     if (have.has(id)) {
       // 渠道已存在，只补 Key（用户可能清空过）
-      if (!haveKey.has(id)) credentials.push({ channelId: id, apiKey: p.apiKey })
+      if (!haveKey.has(id) && p.apiKey) credentials.push({ channelId: id, apiKey: p.apiKey })
       continue
     }
     userChannels.push({
@@ -182,8 +187,8 @@ function seedPresets(s: AppSettings): AppSettings {
       authHeader: p.spec.authHeader || 'Authorization',
       authPrefix: p.spec.authPrefix ?? 'Bearer ',
     })
-    credentials.push({ channelId: id, apiKey: p.apiKey })
-    lastModelByChannel[id] = p.defaultModel
+    if (seededKey) credentials.push({ channelId: id, apiKey: seededKey })
+    lastModelByChannel[id] = seededKey ? p.defaultModel : (lastModelByChannel[id] || p.defaultModel)
   }
 
   // RunningHub 的 Key 与工作流也一并带入（来自同一份 HHPS 配置）
