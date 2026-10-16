@@ -250,7 +250,26 @@ export function exportSettings(s: AppSettings): string {
   return JSON.stringify(s, null, 2)
 }
 
+/**
+ * 导入配置
+ *
+ * 不能只做浅合并：导入的配置里 userChannels 可能是空的（导出时用的就是空模板），
+ * 直接覆盖会把预置渠道的定义一起抹掉，连带上面的 Key 也无处可挂。
+ * 这里改为把导入的渠道与当前预置的渠道合并，再走一遍 seedPresets 补齐缺失项。
+ */
 export function importSettings(json: string): AppSettings {
-  const parsed = JSON.parse(json)
-  return { ...DEFAULT_SETTINGS, ...parsed }
+  const parsed = JSON.parse(json) as Partial<AppSettings>
+
+  const base: AppSettings = {
+    ...DEFAULT_SETTINGS,
+    ...parsed,
+    // 渠道定义：以导入的为准，但预置渠道由 seedPresets 补齐
+    userChannels: parsed.userChannels || [],
+    // 已带 Key 的渠道记录下来，seedPresets 会据此把渠道条目建出来
+    credentials: parsed.credentials || [],
+    savedWorkflows: parsed.savedWorkflows || [],
+    lastModelByChannel: parsed.lastModelByChannel || {},
+  }
+
+  return seedPresets(base)
 }
