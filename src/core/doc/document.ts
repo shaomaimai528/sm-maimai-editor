@@ -37,10 +37,6 @@ export function insertLayerAbove(doc: Doc, refId: string | null, layer: Layer): 
   return { ...doc, layers, activeLayerId: layer.id }
 }
 
-export function insertLayerTop(doc: Doc, layer: Layer): Doc {
-  return { ...doc, layers: [...doc.layers, layer], activeLayerId: layer.id }
-}
-
 export function removeLayer(doc: Doc, id: string): Doc {
   if (doc.layers.length <= 1) return doc // 至少保留一层
   const layers = doc.layers.filter((l) => l.id !== id)

@@ -56,34 +56,30 @@ async function upload(blob: Blob, apiKey: string, baseUrl: string): Promise<stri
   )
 }
 
-/** 提交任务 */
+/**
+ * 提交任务
+ *
+ * 用户只需提供 workflowId（配合 API Key）即可调用自己的工作流。
+ * 实测确认：POST /task/openapi/create 传 {apiKey, workflowId} 会返回
+ * "workflow not exists"（而非参数缺失），说明该请求形状是完整可用的。
+ *
+ * 若用户填了 appId，则优先尝试 AI App 接口；否则直接走工作流接口。
+ */
 async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Promise<SubmitOutcome> {
   const imageRef = req.fileToken || req.imageDataUrl || ''
-  const nodeInfoList = req.extra?.nodeInfoList as unknown[] | undefined
-  const workflowId = req.extra?.workflowId as string | undefined
-
-  // 变体 1：新版 AI App 接口
-  const appVariants: Array<Record<string, unknown>> = []
-  if (nodeInfoList) {
-    appVariants.push({ apiKey, appId: req.model, nodeInfoList })
-    if (req.extra?.instanceType) {
-      appVariants.push({ apiKey, appId: req.model, nodeInfoList, instanceType: req.extra.instanceType })
-    }
-  }
-
-  // 变体 2：legacy 工作流接口
-  const legacyBody = workflowId
-    ? { apiKey, workflowId, nodeParams: { ...(req.extra?.nodeParams as object || {}), prompt: req.prompt, image: imageRef } }
-    : null
+  const workflowId = String(req.extra?.workflowId || '').trim()
+  const appId = String(req.extra?.appId || '').trim()
 
   const attempts: Array<() => Promise<SubmitOutcome>> = []
 
-  for (const body of appVariants) {
+  // 路径 1：用户提供了 appId —— 走 AI App 接口
+  if (appId) {
+    const nodeInfoList = (req.extra?.nodeInfoList as unknown[]) || buildNodeInfoList(req, imageRef)
     attempts.push(async () => {
       const res = await fetchJson(`${baseUrl}/task/openapi/ai-app/run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ apiKey, appId, nodeInfoList }),
       }, 180_000, 'RunningHub')
       const taskId = extractTaskId(res)
       if (!taskId) throw new AIError(extractMessage(res) || '任务已创建但未返回 taskId')
@@ -91,12 +87,24 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
     })
   }
 
-  if (legacyBody) {
+  // 路径 2：工作流接口 —— 只需 workflowId
+  if (workflowId) {
+    // 带上提示词与图片，字段名兼容常见工作流节点命名
+    const nodeParams: Record<string, unknown> = {
+      ...(req.extra?.nodeParams as object || {}),
+      prompt: req.prompt,
+      text: req.prompt,
+    }
+    if (imageRef) {
+      nodeParams.image = imageRef
+      nodeParams.imageUrl = imageRef
+    }
+
     attempts.push(async () => {
       const res = await fetchJson(`${baseUrl}/task/openapi/create`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(legacyBody),
+        body: JSON.stringify({ apiKey, workflowId, nodeParams }),
       }, 180_000, 'RunningHub')
       const taskId = extractTaskId(res)
       if (!taskId) throw new AIError(extractMessage(res) || '任务已创建但未返回 taskId')
@@ -105,10 +113,20 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
   }
 
   if (!attempts.length) {
-    throw new AIError('缺少 appId(nodeInfoList) 或 workflowId，无法提交 RunningHub 任务')
+    throw new AIError('请先在设置里填写 RunningHub 的工作流 ID')
   }
 
   return tryEach(attempts, (i, e) => console.warn('[RunningHub] 提交变体失败', i, (e as Error)?.message))
+}
+
+/** 把提示词与图片组装成 AI App 需要的节点参数列表 */
+function buildNodeInfoList(req: SubmitRequest, imageRef: string): unknown[] {
+  const list: Array<Record<string, unknown>> = []
+  list.push({ nodeId: 'prompt', fieldName: 'text', fieldValue: req.prompt })
+  if (imageRef) {
+    list.push({ nodeId: 'image', fieldName: 'image', fieldValue: imageRef })
+  }
+  return list
 }
 
 /** 轮询任务 */

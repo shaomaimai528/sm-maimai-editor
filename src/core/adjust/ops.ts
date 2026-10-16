@@ -61,46 +61,4 @@ export function applyAdjust(img: ImageData, p: AdjustParams): ImageData {
   return img
 }
 
-/** 计算直方图（RGB 三通道 + 亮度） */
-export function histogram(img: ImageData) {
-  const r = new Uint32Array(256)
-  const g = new Uint32Array(256)
-  const b = new Uint32Array(256)
-  const lum = new Uint32Array(256)
-  const d = img.data
 
-  for (let i = 0; i < d.length; i += 4) {
-    r[d[i]]++; g[d[i + 1]]++; b[d[i + 2]]++
-    lum[Math.round(0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2])]++
-  }
-  return { r, g, b, lum }
-}
-
-/** 解析曲线控制点到查找表 */
-export function curveLUT(points: Array<[number, number]>): Uint8ClampedArray {
-  const lut = new Uint8ClampedArray(256)
-  if (!points || points.length < 2) {
-    for (let i = 0; i < 256; i++) lut[i] = i
-    return lut
-  }
-  const sorted = [...points].sort((a, b) => a[0] - b[0])
-
-  for (let i = 0; i < 256; i++) {
-    const x = i / 255
-    let y: number
-    if (x <= sorted[0][0]) y = sorted[0][1]
-    else if (x >= sorted[sorted.length - 1][0]) y = sorted[sorted.length - 1][1]
-    else {
-      let k = 0
-      while (k < sorted.length - 1 && sorted[k + 1][0] < x) k++
-      const [x0, y0] = sorted[k]
-      const [x1, y1] = sorted[k + 1]
-      const t = (x - x0) / Math.max(1e-6, x1 - x0)
-      // 平滑插值，避免曲线出现折角
-      const ts = t * t * (3 - 2 * t)
-      y = y0 + (y1 - y0) * ts
-    }
-    lut[i] = Math.max(0, Math.min(255, Math.round(y * 255)))
-  }
-  return lut
-}

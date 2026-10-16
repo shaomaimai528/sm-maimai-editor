@@ -12,6 +12,24 @@ export interface ChannelCredential {
   apiKey: string
 }
 
+/** 用户自建渠道的持久化结构 */
+export interface UserChannelConfig {
+  id: string
+  label: string
+  apiUrl: string
+  models: string
+  mode: 'sync' | 'poll'
+  submitPath: string
+  pollPath: string
+  imageField: string
+  promptField: string
+  modelField: string
+  taskIdField: string
+  imageAsDataUrl: boolean
+  authHeader: string
+  authPrefix: string
+}
+
 export interface AppSettings {
   credentials: ChannelCredential[]
   activeChannelId: string
@@ -22,11 +40,33 @@ export interface AppSettings {
   featherRadius: number
   /** 贴回时是否做颜色匹配 */
   colorMatch: boolean
-  /** RunningHub 专用 */
-  runningHubAppId: string
+  /** RunningHub 专用：只需工作流 ID */
   runningHubWorkflowId: string
+  /** RunningHub 可选：应用 ID（通常不用填） */
+  runningHubAppId: string
   /** OpenAI 是否尝试 edits 路径 */
   openaiUseEdits: boolean
+  /** 用户自建渠道列表 */
+  userChannels: UserChannelConfig[]
+}
+
+export function makeDefaultUserChannel(id: string): UserChannelConfig {
+  return {
+    id,
+    label: '',
+    apiUrl: '',
+    models: '',
+    mode: 'sync',
+    submitPath: '/v1/images/generations',
+    pollPath: '',
+    imageField: 'image',
+    promptField: 'prompt',
+    modelField: 'model',
+    taskIdField: 'taskId',
+    imageAsDataUrl: true,
+    authHeader: 'Authorization',
+    authPrefix: 'Bearer ',
+  }
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -40,6 +80,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   runningHubAppId: '',
   runningHubWorkflowId: '',
   openaiUseEdits: false,
+  userChannels: [],
 }
 
 const KEY = 'app-settings-v1'

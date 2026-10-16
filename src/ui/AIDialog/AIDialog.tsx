@@ -7,7 +7,7 @@ import { Sparkles, X, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { Sheet } from '../primitives/Sheet'
 import { Button } from '../primitives/Button'
 import { useEditor } from '../../state/editorStore'
-import { CHANNELS, getChannel } from '../../core/ai/channels'
+import { allChannels, getChannel } from '../../core/ai/channels'
 import { generate, fetchResultBitmap } from '../../core/ai/pipeline'
 import { AIError } from '../../core/ai/types'
 import {
@@ -47,7 +47,11 @@ export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) 
   const selection = useEditor((s) => s.selection)
   const commit = useEditor((s) => s.commit)
 
-  const channel = useMemo(() => getChannel(settings.activeChannelId) || CHANNELS[0], [settings.activeChannelId])
+  const channels = useMemo(() => allChannels(), [settings.userChannels])
+  const channel = useMemo(
+    () => getChannel(settings.activeChannelId) || channels[0],
+    [settings.activeChannelId, channels]
+  )
   const selBounds = useMemo(
     () => (selection ? selectionBounds(selection) : null),
     [selection]
@@ -95,6 +99,7 @@ export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) 
             appId: settings.runningHubAppId,
             workflowId: settings.runningHubWorkflowId,
             useEdits: settings.openaiUseEdits,
+            custom: channel.custom,
           },
         },
         onProgress: (info) => setPhase(info.phase),
@@ -170,7 +175,7 @@ export function AIDialog({ open, onClose, settings, apiKey, onNeedKey }: Props) 
               ;(window as any).__dshSetChannel?.(id, c?.defaultModel || c?.imageModels[0] || '')
             }}
           >
-            {CHANNELS.map((c) => (
+            {channels.map((c) => (
               <option key={c.id} value={c.id}>{c.label}</option>
             ))}
           </select>

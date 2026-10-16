@@ -6,7 +6,10 @@ import { useEditor } from '../../state/editorStore'
 import { LassoTool } from '../../core/selection/lasso'
 import { BrushTool } from '../../core/selection/brush'
 import { DEFAULT_BRUSH } from '../../core/selection/brush'
-import { magicWand, createMask } from '../../core/selection/mask'
+import { magicWand, createMask, feather } from '../../core/selection/mask'
+import { useComposedBitmap } from './useComposedBitmap'
+import { SelectionOverlay } from './SelectionOverlay'
+import { SelectionBar } from './SelectionBar'
 import { useGestures } from './useGestures'
 import './CanvasStage.css'
 
@@ -18,19 +21,22 @@ export function CanvasStage() {
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
 
   const doc = useEditor((s) => s.doc)
-  const proxy = useEditor((s) => s.proxy)
   const tool = useEditor((s) => s.tool)
   const selection = useEditor((s) => s.selection)
-  const maskTarget = useEditor((s) => s.maskTargetLayerId)
   const setSelection = useEditor((s) => s.setSelection)
   const commit = useEditor((s) => s.commit)
   const setView = useEditor((s) => s.setView)
   const showOriginal = useEditor((s) => s.showOriginal)
   const setShowOriginal = useEditor((s) => s.setShowOriginal)
+  const sourceBitmap = useEditor((s) => s.sourceBitmap)
+  const pushSelectionHistory = useEditor((s) => s.pushSelectionHistory)
 
   const [lassoPoints, setLassoPoints] = useState<number[]>([])
   const [brushCursor, setBrushCursor] = useState<{ x: number; y: number } | null>(null)
   const isDrawing = useRef(false)
+
+  // 按渲染管线合成真实画面（含调整层、图层蒙版、AI 图层）
+  const composed = useComposedBitmap(doc)
 
   // 容器尺寸自适应
   useEffect(() => {
@@ -95,26 +101,26 @@ export function CanvasStage() {
       lasso.begin(p.x, p.y)
       setLassoPoints([p.x, p.y])
     } else if (tool === 'wand') {
-      const bmp = proxy?.bitmap
+      // 以屏幕显示的画面取色，所见即所得
+      const bmp = composed?.bitmap
       if (!bmp) return
       const canvas = new OffscreenCanvas(bmp.width, bmp.height)
       const ctx = canvas.getContext('2d')!
       ctx.drawImage(bmp, 0, 0)
       const img = ctx.getImageData(0, 0, bmp.width, bmp.height)
-      // 坐标换算到代理图尺寸
+      // 坐标换算到画面尺寸
       const px = Math.round(p.x * (bmp.width / doc.width))
       const py = Math.round(p.y * (bmp.height / doc.height))
       const mask = magicWand(img.data, bmp.width, bmp.height, px, py, 32)
       setSelection(mask)
     } else if (tool === 'brush' || tool === 'erase') {
-      if (!selection) {
-        setSelection(createMask(doc.width, doc.height, 0))
-        return
-      }
+      // 原实现首次落笔只建空蒙版就 return，导致第一下涂抹丢失。
+      // 改为：没有蒙版就用当前笔触直接建立，然后再应用这一笔。
+      const base = selection ?? createMask(doc.width, doc.height, 0)
       const s = { ...DEFAULT_BRUSH, erase: tool === 'erase' }
-      setSelection(brush.begin(selection, s, p.x, p.y))
+      setSelection(brush.begin(base, s, p.x, p.y))
     }
-  }, [doc, tool, toDoc, proxy, selection, setSelection])
+  }, [doc, tool, toDoc, composed, selection, setSelection])
 
   const handlePointerMove = useCallback((e: Konva.KonvaEventObject<PointerEvent>) => {
     if (!doc) return
@@ -144,8 +150,12 @@ export function CanvasStage() {
       if (m) setSelection(m)
       setLassoPoints([])
     }
+    // 笔刷/擦除结束后把选区写入历史，否则撤销无效
+    if ((tool === 'brush' || tool === 'erase') && selection) {
+      pushSelectionHistory(tool === 'erase' ? '擦除选区' : '涂抹选区', selection)
+    }
     brush.end()
-  }, [tool, doc, setSelection])
+  }, [tool, doc, selection, setSelection, pushSelectionHistory])
 
   const stageW = size.w
   const stageH = size.h
@@ -167,18 +177,27 @@ export function CanvasStage() {
         style={{ touchAction: 'none' }}
       >
         <KLayer x={transform.x} y={transform.y} scaleX={transform.scale} scaleY={transform.scale}>
-          {/* 底图（代理图） */}
-          {proxy && !showOriginal && (
-            <KImage image={proxy.bitmap} width={base.w} height={base.h} />
+          {/* 合成结果：含全部图层、蒙版与调整参数 */}
+          {!showOriginal && composed && (
+            <KImage image={composed.bitmap} width={base.w} height={base.h} />
           )}
-          {/* 长按看原图：只显示源图 */}
-          {showOriginal && doc && (
-            <KImage
-              image={useEditor.getState().sourceBitmap || undefined}
-              width={base.w}
-              height={base.h}
+          {/* 长按看原图 */}
+          {showOriginal && doc && sourceBitmap && (
+            <KImage image={sourceBitmap} width={base.w} height={base.h} />
+          )}
+
+          {/* 选区可视化：蚂蚁线 + 半透明遮罩 */}
+          {selection && !showOriginal && (
+            <SelectionOverlay
+              selection={selection}
+              docWidth={doc?.width || 1}
+              docHeight={doc?.height || 1}
+              viewWidth={base.w}
+              viewHeight={base.h}
+              zoom={view.zoom}
             />
           )}
+
           {/* 套索轨迹 */}
           {lassoPoints.length >= 4 && (
             <Line
@@ -205,6 +224,8 @@ export function CanvasStage() {
       )}
 
       {showOriginal && <div className="original-badge">原图</div>}
+
+      <SelectionBar />
     </div>
   )
 }

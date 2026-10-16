@@ -62,9 +62,15 @@ async function renderLayer(
 ) {
   // 调整层：对当前已合成内容做整体调整
   if (layer.kind === 'adjustment' && layer.params) {
-    const img = ctx.getImageData(0, 0, width, height)
-    applyAdjust(img, layer.params)
-    ctx.putImageData(img, 0, 0)
+    // 大图一次性 getImageData 会占用 width*height*4 字节，
+    // 4000x3000 就是 48MB，iOS 上容易直接崩。改为分块处理。
+    const CHUNK = 512
+    for (let y0 = 0; y0 < height; y0 += CHUNK) {
+      const h = Math.min(CHUNK, height - y0)
+      const img = ctx.getImageData(0, y0, width, h)
+      applyAdjust(img, layer.params)
+      ctx.putImageData(img, 0, y0)
+    }
     return
   }
 
@@ -79,19 +85,25 @@ async function renderLayer(
   tctx.drawImage(bmp, 0, 0, width, height)
 
   if (layer.mask?.data) {
-    const img = tctx.getImageData(0, 0, width, height)
-    const d = img.data
+    // 同样分块，控制单次内存占用
+    const CHUNK = 512
     const mw = layer.mask.width
     const mh = layer.mask.height
-    for (let y = 0; y < height; y++) {
-      const my = Math.min(mh - 1, Math.floor((y / height) * mh))
-      for (let x = 0; x < width; x++) {
-        const mx = Math.min(mw - 1, Math.floor((x / width) * mw))
-        const a = layer.mask.data[my * mw + mx]
-        d[(y * width + x) * 4 + 3] = Math.round(d[(y * width + x) * 4 + 3] * (a / 255))
+    for (let y0 = 0; y0 < height; y0 += CHUNK) {
+      const h = Math.min(CHUNK, height - y0)
+      const img = tctx.getImageData(0, y0, width, h)
+      const d = img.data
+      for (let y = 0; y < h; y++) {
+        const my = Math.min(mh - 1, Math.floor(((y0 + y) / height) * mh))
+        for (let x = 0; x < width; x++) {
+          const mx = Math.min(mw - 1, Math.floor((x / width) * mw))
+          const a = layer.mask.data[my * mw + mx]
+          const idx = (y * width + x) * 4 + 3
+          d[idx] = Math.round(d[idx] * (a / 255))
+        }
       }
+      tctx.putImageData(img, 0, y0)
     }
-    tctx.putImageData(img, 0, 0)
   }
 
   ctx.globalAlpha = layer.opacity

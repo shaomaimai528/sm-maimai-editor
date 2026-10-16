@@ -1,6 +1,32 @@
 /** AI 渠道层的统一抽象 —— UI 只认这套接口，不感知底层协议差异 */
 
-export type Family = 'runninghub' | 'grs' | 'newapi' | 'openai'
+export type Family = 'runninghub' | 'grs' | 'newapi' | 'openai' | 'custom'
+
+/** 自定义渠道的协议配置 */
+export interface CustomSpec {
+  /** 返回方式：同步直出图片，或返回任务号需轮询 */
+  mode: 'sync' | 'poll'
+  /** 提交路径，默认 /v1/images/generations */
+  submitPath: string
+  /** 轮询路径（mode 为 poll 时必填） */
+  pollPath?: string
+  /** 请求体里的图片字段名，默认 image */
+  imageField?: string
+  /** 提示词字段名，默认 prompt */
+  promptField?: string
+  /** 模型字段名，默认 model */
+  modelField?: string
+  /** 轮询时用的任务号字段名，默认 taskId */
+  taskIdField?: string
+  /** 是否把图片以 dataURL 形式内嵌进 JSON（false 则用 multipart 表单） */
+  imageAsDataUrl?: boolean
+  /** 鉴权头名称，默认 Authorization */
+  authHeader?: string
+  /** 鉴权值前缀，默认 "Bearer " */
+  authPrefix?: string
+  /** 额外请求头 */
+  extraHeaders?: Record<string, string>
+}
 
 export interface Channel {
   id: string
@@ -20,6 +46,10 @@ export interface Channel {
   resolutions: string[]
   /** 该渠道是否需要先上传图片拿 token */
   needsUpload: boolean
+  /** 用户自定义渠道的协议细节 */
+  custom?: CustomSpec
+  /** 是否为用户自建渠道（可编辑、可删除） */
+  isUserDefined?: boolean
 }
 
 export interface SubmitRequest {

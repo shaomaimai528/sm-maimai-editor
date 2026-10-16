@@ -7,6 +7,7 @@ import { runninghubProvider } from './runninghub'
 import { grsProvider } from './grs'
 import { newapiProvider } from './newapi'
 import { openaiProvider } from './openai'
+import { customProvider } from './custom'
 
 export const ASPECT_RATIOS = ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
 export const RESOLUTIONS = ['1K', '2K', '4K']
@@ -122,10 +123,50 @@ const PROVIDERS: Record<Family, Provider> = {
   grs: grsProvider,
   newapi: newapiProvider,
   openai: openaiProvider,
+  custom: customProvider,
+}
+
+/** 用户自建渠道存放在设置里，这里做合并查询 */
+let userChannels: Channel[] = []
+
+export function setUserChannels(list: Channel[]) {
+  userChannels = Array.isArray(list) ? list : []
+}
+
+export function getUserChannels(): Channel[] {
+  return userChannels
+}
+
+/** 全部渠道 = 内置 + 用户自建 */
+export function allChannels(): Channel[] {
+  return [...CHANNELS, ...userChannels]
 }
 
 export function getChannel(id: string): Channel | undefined {
-  return CHANNELS.find((c) => c.id === id)
+  return allChannels().find((c) => c.id === id)
+}
+
+/** 创建一条自定义渠道 */
+export function makeCustomChannel(input: {
+  id: string
+  label: string
+  apiUrl: string
+  models: string[]
+  custom: Channel['custom']
+}): Channel {
+  return {
+    id: input.id,
+    label: input.label,
+    family: 'custom',
+    apiUrl: input.apiUrl.replace(/\/+$/, ''),
+    imageModels: input.models,
+    defaultModel: input.models[0],
+    aspectRatios: ASPECT_RATIOS,
+    resolutions: RESOLUTIONS,
+    needsUpload: false,
+    custom: input.custom,
+    isUserDefined: true,
+  }
 }
 
 export function getProvider(family: Family): Provider {

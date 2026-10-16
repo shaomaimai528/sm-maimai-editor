@@ -35,8 +35,4 @@ export async function loadImageFile(file: File): Promise<LoadedImage> {
   return { bitmap, width: w, height: h, downsampled: true }
 }
 
-/** 从 URL / Blob 加载 */
-export async function loadImageBlob(blob: Blob): Promise<LoadedImage> {
-  const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' })
-  return { bitmap, width: bitmap.width, height: bitmap.height, downsampled: false }
-}
+

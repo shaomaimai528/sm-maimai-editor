@@ -10,11 +10,36 @@ import { AdjustDialog } from '../ui/Adjust/AdjustDialog'
 import { Button } from '../ui/primitives/Button'
 import { useEditor } from '../state/editorStore'
 import { loadSettings, saveSettings, getKeyFor, type AppSettings, DEFAULT_SETTINGS } from '../state/settings'
+import { setUserChannels, makeCustomChannel } from '../core/ai/channels'
 import { loadImageFile } from '../core/render/load'
-import { makeProxy, renderDoc } from '../core/render/pipeline'
+import { renderDoc } from '../core/render/pipeline'
 import { createDoc } from '../core/doc/document'
 import { encodeCanvas, downloadBlob, suggestFilename, DEFAULT_EXPORT } from '../core/render/export'
 import './App.css'
+
+/** 把持久化的用户渠道配置转成运行时 Channel */
+function toChannels(s: AppSettings) {
+  return (s.userChannels || []).map((uc) =>
+    makeCustomChannel({
+      id: uc.id,
+      label: uc.label || '自定义渠道',
+      apiUrl: uc.apiUrl || 'https://example.invalid',
+      models: uc.models.split(',').map((m) => m.trim()).filter(Boolean),
+      custom: {
+        mode: uc.mode,
+        submitPath: uc.submitPath,
+        pollPath: uc.pollPath,
+        imageField: uc.imageField,
+        promptField: uc.promptField,
+        modelField: uc.modelField,
+        taskIdField: uc.taskIdField,
+        imageAsDataUrl: uc.imageAsDataUrl,
+        authHeader: uc.authHeader,
+        authPrefix: uc.authPrefix,
+      },
+    })
+  )
+}
 
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
@@ -28,16 +53,20 @@ export function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const doc = useEditor((s) => s.doc)
   const setDoc = useEditor((s) => s.setDoc)
-  const setProxy = useEditor((s) => s.setProxy)
-  const proxy = useEditor((s) => s.proxy)
 
   // 载入设置
   useEffect(() => {
     loadSettings().then((s) => {
       setSettings(s)
+      setUserChannels(toChannels(s))
       setSettingsLoaded(true)
     })
   }, [])
+
+  // 用户自建渠道变化时同步到渠道注册表，让 AI 面板能立刻看到
+  useEffect(() => {
+    setUserChannels(toChannels(settings))
+  }, [settings.userChannels])
 
   const persist = useCallback((s: AppSettings) => {
     setSettings(s)
@@ -53,18 +82,6 @@ export function App() {
       persist({ ...settings, activeModel: model })
     }
   }, [settings, persist])
-
-  // 文档变化时重建代理图（代理图只依赖源图，不依赖图层参数）
-  useEffect(() => {
-    if (!doc) return
-    const base = doc.layers[0]?.source?.bitmap
-    if (!base) return
-    let cancelled = false
-    makeProxy(base).then((p) => {
-      if (!cancelled) setProxy(p)
-    })
-    return () => { cancelled = true }
-  }, [doc?.layers[0]?.source?.bitmap, setProxy])
 
   const toastTimer = useRef<number | null>(null)
   const showToast = useCallback((msg: string) => {

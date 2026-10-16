@@ -1,0 +1,84 @@
+.sel-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--safe-b) + 86px);
+  z-index: 45;
+  background: rgba(26, 26, 26, 0.92);
+  border-radius: var(--r-lg);
+  padding: 8px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  /* 出现动画 */
+  animation: enter-rise var(--dur-base) var(--ease-out) both;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sel-bar-row {
+  display: flex;
+  gap: 4px;
+}
+
+.sel-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.sel-btn:active { transform: scale(0.94); }
+.sel-btn[data-on='true'] { background: var(--c-accent); color: #fff; }
+@media (hover: hover) {
+  .sel-btn:hover { background: rgba(255, 255, 255, 0.14); }
+  .sel-btn[data-on='true']:hover { background: var(--c-accent); }
+}
+.sel-btn-clear { color: rgba(255, 255, 255, 0.55); }
+
+.sel-bar-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 2px;
+  animation: enter-rise var(--dur-fast) var(--ease-out) both;
+}
+.sel-bar-slider .slider { flex: 1; padding: 0; }
+.sel-bar-slider .slider-label { color: rgba(255, 255, 255, 0.75); }
+.sel-bar-slider .slider-value {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.sel-bar-slider .slider-track { background: rgba(255, 255, 255, 0.2); }
+
+.sel-apply {
+  border: none;
+  background: var(--c-accent);
+  color: #fff;
+  border-radius: var(--r-full);
+  padding: 8px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.sel-apply:active { transform: scale(0.96); }
+
+.sel-bar-tip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  padding-bottom: 2px;
+}
