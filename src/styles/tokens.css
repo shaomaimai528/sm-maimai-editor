@@ -1,0 +1,108 @@
+/* ============================================================
+   设计令牌 —— 严格遵守全局指令
+   主色白 / 黑结构 / 蓝强调 / 红仅危险语义
+   ============================================================ */
+:root {
+  /* 配色：不引入其他色系 */
+  --c-bg: #ffffff;
+  --c-ink: #0a0a0a;
+  --c-accent: #2563eb;
+  --c-danger: #dc2626;
+
+  /* 结构灰阶（由黑派生，非新色系） */
+  --c-ink-70: rgba(10, 10, 10, 0.7);
+  --c-ink-50: rgba(10, 10, 10, 0.5);
+  --c-ink-30: rgba(10, 10, 10, 0.3);
+  --c-ink-12: rgba(10, 10, 10, 0.12);
+  --c-ink-06: rgba(10, 10, 10, 0.06);
+  --c-surface: #f5f5f5;
+  --c-canvas-bg: #1a1a1a; /* 画布工作区底色，突出图片 */
+
+  /* 动效：时长与缓动统一克制 */
+  --dur-fast: 150ms;
+  --dur-base: 240ms;
+  --dur-slow: 400ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* 圆角与层次 */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-full: 999px;
+  --shadow-sheet: 0 -8px 32px rgba(10, 10, 10, 0.14);
+
+  /* 安全区 */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+
+  /* 尺寸 */
+  --h-toolbar: 52px;
+  --h-tabbar: 60px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* 防止移动端点击高亮与 300ms 延迟 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+button { font: inherit; color: inherit; }
+
+/* ============================================================
+   三态动画基础 keyframes
+   每个可见元素必须有 enter / transition / exit
+   ============================================================ */
+@keyframes enter-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes exit-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes enter-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes exit-rise {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
+}
+@keyframes enter-sheet {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes exit-sheet {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+@keyframes enter-scale {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes exit-scale {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+/* 无障碍：尊重系统设置，全部降级为直接切换 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

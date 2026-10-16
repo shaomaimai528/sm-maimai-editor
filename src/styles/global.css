@@ -1,0 +1,30 @@
+@import './tokens.css';
+
+/* 通用布局工具 */
+.stack { display: flex; flex-direction: column; }
+.row { display: flex; flex-direction: row; align-items: center; }
+.center { display: flex; align-items: center; justify-content: center; }
+.grow { flex: 1; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+
+/* 三态过渡的通用类：配合 data-state 使用 */
+.anim-fade {
+  animation: enter-fade var(--dur-base) var(--ease-out) both;
+}
+.anim-fade[data-state='exiting'] {
+  animation: exit-fade var(--dur-fast) var(--ease-out) both;
+}
+.anim-rise {
+  animation: enter-rise var(--dur-base) var(--ease-out) both;
+}
+.anim-rise[data-state='exiting'] {
+  animation: exit-rise var(--dur-fast) var(--ease-out) both;
+}
+
+/* 焦点环：键盘可达性 */
+:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

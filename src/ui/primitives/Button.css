@@ -1,0 +1,65 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  font-weight: 500;
+  white-space: nowrap;
+  /* 过渡动画：状态 A→B */
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+  /* 出现动画起始态 */
+  opacity: 0;
+  transform: scale(0.94);
+}
+
+.btn[data-mounted='true'] {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.btn[data-size='sm'] { padding: 6px 12px; font-size: 13px; }
+.btn[data-size='md'] { padding: 9px 16px; font-size: 15px; }
+.btn[data-size='lg'] { padding: 13px 22px; font-size: 16px; }
+
+.btn[data-variant='primary'] {
+  background: var(--c-accent);
+  color: #fff;
+}
+.btn[data-variant='ghost'] {
+  background: var(--c-ink-06);
+  color: var(--c-ink);
+}
+.btn[data-variant='danger'] {
+  background: transparent;
+  color: var(--c-danger);
+  border: 1px solid var(--c-danger);
+}
+
+/* 微交互：hover / active 轻微缩放反馈 */
+@media (hover: hover) {
+  .btn[data-variant='primary']:hover { background: #1d4ed8; }
+  .btn[data-variant='ghost']:hover { background: var(--c-ink-12); }
+  .btn:hover { transform: scale(1.02); }
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 图标与文字基线对齐 */
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.btn-icon svg { display: block; }

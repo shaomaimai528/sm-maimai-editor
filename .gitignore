@@ -1,0 +1,30 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+dist-ssr/
+*.local
+
+# ★ 绝对不能提交：任何含 API Key 的文件
+.env
+.env.*
+!.env.example
+*.key
+secrets.json
+config.local.json
+
+# 编辑器 / 系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# 验证产物（浏览器截图与临时脚本）
+.verify/
+
+# 日志
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*

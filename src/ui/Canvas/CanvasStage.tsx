@@ -1,0 +1,210 @@
+/** 画布舞台：渲染文档 + 选区叠加层 + 手势 */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Stage, Layer as KLayer, Image as KImage, Line } from 'react-konva'
+import Konva from 'konva'
+import { useEditor } from '../../state/editorStore'
+import { LassoTool } from '../../core/selection/lasso'
+import { BrushTool } from '../../core/selection/brush'
+import { DEFAULT_BRUSH } from '../../core/selection/brush'
+import { magicWand, createMask } from '../../core/selection/mask'
+import { useGestures } from './useGestures'
+import './CanvasStage.css'
+
+const lasso = new LassoTool()
+const brush = new BrushTool()
+
+export function CanvasStage() {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
+
+  const doc = useEditor((s) => s.doc)
+  const proxy = useEditor((s) => s.proxy)
+  const tool = useEditor((s) => s.tool)
+  const selection = useEditor((s) => s.selection)
+  const maskTarget = useEditor((s) => s.maskTargetLayerId)
+  const setSelection = useEditor((s) => s.setSelection)
+  const commit = useEditor((s) => s.commit)
+  const setView = useEditor((s) => s.setView)
+  const showOriginal = useEditor((s) => s.showOriginal)
+  const setShowOriginal = useEditor((s) => s.setShowOriginal)
+
+  const [lassoPoints, setLassoPoints] = useState<number[]>([])
+  const [brushCursor, setBrushCursor] = useState<{ x: number; y: number } | null>(null)
+  const isDrawing = useRef(false)
+
+  // 容器尺寸自适应
+  useEffect(() => {
+    const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight })
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const view = useEditor((s) => ({ zoom: s.zoom, panX: s.panX, panY: s.panY }))
+
+  // 画布在屏幕上的基准尺寸（适配容器）
+  const base = useMemo(() => {
+    if (!doc) return { w: 0, h: 0, scale: 1 }
+    const padding = 24
+    const availW = size.w - padding * 2
+    const availH = size.h - 200
+    const s = Math.min(availW / doc.width, availH / doc.height, 1)
+    return { w: doc.width * s, h: doc.height * s, scale: s }
+  }, [doc, size])
+
+  /**
+   * Stage 本地坐标 → 文档像素坐标
+   * Stage 坐标系原点在容器左上角，图片被放在 transform 指定的位置并缩放。
+   * 必须先减去 transform 的平移量，再除以总缩放，才是文档坐标。
+   */
+  const toDoc = useCallback((stageX: number, stageY: number) => {
+    if (!doc) return { x: 0, y: 0 }
+    const total = base.scale * view.zoom
+    const tx = size.w / 2 + view.panX - (base.w * view.zoom) / 2
+    const ty = size.h / 2 + view.panY - (base.h * view.zoom) / 2
+    return {
+      x: (stageX - tx) / total,
+      y: (stageY - ty) / total,
+    }
+  }, [doc, base, view, size])
+
+  useGestures(containerRef.current, {
+    onTransform: (t) => {
+      if (tool !== 'move') return
+      if (t.zoom !== undefined) {
+        const z = Math.max(0.3, Math.min(8, view.zoom * t.zoom))
+        setView({ zoom: z })
+      }
+      if (t.panX !== undefined && t.panY !== undefined) {
+        setView({ panX: view.panX + t.panX, panY: view.panY + t.panY })
+      }
+    },
+    onLongPress: () => setShowOriginal(true),
+    onLongPressEnd: () => setShowOriginal(false),
+    enabled: true,
+  })
+
+  // ---- 指针事件：选区与笔刷 ----
+  const handlePointerDown = useCallback((e: Konva.KonvaEventObject<PointerEvent>) => {
+    if (!doc || tool === 'move' || tool === 'adjust') return
+    const pos = e.target.getStage()?.getPointerPosition()
+    if (!pos) return
+    isDrawing.current = true
+    const p = toDoc(pos.x, pos.y)
+
+    if (tool === 'lasso') {
+      lasso.begin(p.x, p.y)
+      setLassoPoints([p.x, p.y])
+    } else if (tool === 'wand') {
+      const bmp = proxy?.bitmap
+      if (!bmp) return
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height)
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(bmp, 0, 0)
+      const img = ctx.getImageData(0, 0, bmp.width, bmp.height)
+      // 坐标换算到代理图尺寸
+      const px = Math.round(p.x * (bmp.width / doc.width))
+      const py = Math.round(p.y * (bmp.height / doc.height))
+      const mask = magicWand(img.data, bmp.width, bmp.height, px, py, 32)
+      setSelection(mask)
+    } else if (tool === 'brush' || tool === 'erase') {
+      if (!selection) {
+        setSelection(createMask(doc.width, doc.height, 0))
+        return
+      }
+      const s = { ...DEFAULT_BRUSH, erase: tool === 'erase' }
+      setSelection(brush.begin(selection, s, p.x, p.y))
+    }
+  }, [doc, tool, toDoc, proxy, selection, setSelection])
+
+  const handlePointerMove = useCallback((e: Konva.KonvaEventObject<PointerEvent>) => {
+    if (!doc) return
+    const pos = e.target.getStage()?.getPointerPosition()
+    if (!pos) return
+    const p = toDoc(pos.x, pos.y)
+
+    if (tool === 'brush' || tool === 'erase') setBrushCursor(p)
+
+    // 用自维护的按下状态判断，比 evt.buttons 可靠
+    if (!isDrawing.current) return
+
+    if (tool === 'lasso' && !lasso.isEmpty()) {
+      lasso.move(p.x, p.y)
+      const pts = lasso.getPoints()
+      setLassoPoints(pts.flatMap((q) => [q.x, q.y]))
+    } else if ((tool === 'brush' || tool === 'erase') && selection) {
+      const s = { ...DEFAULT_BRUSH, erase: tool === 'erase' }
+      setSelection(brush.move(selection, s, p.x, p.y))
+    }
+  }, [doc, tool, toDoc, selection, setSelection])
+
+  const handlePointerUp = useCallback(() => {
+    isDrawing.current = false
+    if (tool === 'lasso' && !lasso.isEmpty() && doc) {
+      const m = lasso.finish(doc.width, doc.height)
+      if (m) setSelection(m)
+      setLassoPoints([])
+    }
+    brush.end()
+  }, [tool, doc, setSelection])
+
+  const stageW = size.w
+  const stageH = size.h
+
+  const transform = {
+    x: stageW / 2 + view.panX - (base.w * view.zoom) / 2,
+    y: stageH / 2 + view.panY - (base.h * view.zoom) / 2,
+    scale: view.zoom,
+  }
+
+  return (
+    <div className="canvas-stage" ref={containerRef}>
+      <Stage
+        width={stageW}
+        height={stageH}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        style={{ touchAction: 'none' }}
+      >
+        <KLayer x={transform.x} y={transform.y} scaleX={transform.scale} scaleY={transform.scale}>
+          {/* 底图（代理图） */}
+          {proxy && !showOriginal && (
+            <KImage image={proxy.bitmap} width={base.w} height={base.h} />
+          )}
+          {/* 长按看原图：只显示源图 */}
+          {showOriginal && doc && (
+            <KImage
+              image={useEditor.getState().sourceBitmap || undefined}
+              width={base.w}
+              height={base.h}
+            />
+          )}
+          {/* 套索轨迹 */}
+          {lassoPoints.length >= 4 && (
+            <Line
+              points={lassoPoints.map((v, i) => (i % 2 === 0 ? (v / (doc?.width || 1)) * base.w : (v / (doc?.height || 1)) * base.h))}
+              stroke="#2563EB"
+              strokeWidth={2 / view.zoom}
+              dash={[8 / view.zoom, 6 / view.zoom]}
+              closed
+              listening={false}
+            />
+          )}
+        </KLayer>
+      </Stage>
+
+      {/* 笔刷光标：跟随手指 */}
+      {brushCursor && (tool === 'brush' || tool === 'erase') && (
+        <div
+          className="brush-cursor"
+          style={{
+            left: transform.x + brushCursor.x * base.scale * view.zoom,
+            top: transform.y + brushCursor.y * base.scale * view.zoom,
+          }}
+        />
+      )}
+
+      {showOriginal && <div className="original-badge">原图</div>}
+    </div>
+  )
+}

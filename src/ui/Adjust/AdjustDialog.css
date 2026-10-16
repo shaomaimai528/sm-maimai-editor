@@ -1,0 +1,8 @@
+.adjust { display: flex; flex-direction: column; gap: 4px; }
+
+.adjust-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 16px;
+}
+.adjust-actions .btn { flex: 1; }

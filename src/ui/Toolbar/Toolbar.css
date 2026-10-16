@@ -1,0 +1,102 @@
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--safe-t) + 8px) 12px 8px;
+  gap: 8px;
+  background: linear-gradient(to bottom, rgba(26, 26, 26, 0.92), rgba(26, 26, 26, 0));
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+
+.topbar-left, .topbar-right { display: flex; align-items: center; gap: 6px; }
+
+/* 顶部按钮在深色画布上需要反色 */
+.topbar .btn[data-variant='ghost'] {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.topbar .btn[data-variant='ghost']:hover { background: rgba(255, 255, 255, 0.2); }
+
+.bottombar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px calc(var(--safe-b) + 10px);
+  background: linear-gradient(to top, rgba(26, 26, 26, 0.95), rgba(26, 26, 26, 0));
+  animation: enter-rise var(--dur-slow) var(--ease-out) both;
+}
+
+.tool-strip {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--r-full);
+  padding: 4px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.tool-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 4px;
+  border: none;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: background-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.tool-btn:active { transform: scale(0.94); }
+.tool-btn[data-active='true'] {
+  background: #fff;
+  color: var(--c-ink);
+}
+.tool-label { font-size: 10px; line-height: 1; }
+
+.ai-fab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 60px;
+  height: 60px;
+  border: none;
+  border-radius: 50%;
+  background: var(--c-ink-30);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out);
+}
+/* 有选区时才点亮，明确提示"可以生成" */
+.ai-fab[data-ready='true'] {
+  background: var(--c-accent);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+}
+.ai-fab:active { transform: scale(0.94); }
+@media (hover: hover) {
+  .ai-fab[data-ready='true']:hover { transform: scale(1.04); }
+}
