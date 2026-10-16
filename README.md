@@ -1,15 +1,17 @@
-# AI 修图
+# SM烧麦麦修图
 
 手机浏览器直接打开就能用的 AI 修图应用。支持选区、蒙版与多渠道 AI 生成，**纯静态部署，不需要服务器和域名**。
 
 ## 特性
 
-- **选区与蒙版**：自由套索、魔术棒、蒙版笔刷（可擦可补）、羽化、反选、扩张收缩
+- **选区与蒙版**：矩形框选、自由套索、魔术棒、蒙版笔刷（可擦可补）、羽化、反选、扩张收缩
+- **笔刷**：大小、硬度、流量、不透明度四项可调，手感对齐 PS；可涂选区，也可涂图层蒙版
+- **图层体系**：缩略图预览、不透明度、9 种混合模式、重命名、复制、增删蒙版
 - **非破坏性编辑**：所有操作存为参数，可反复修改；撤销重做完整
-- **图层体系**：蒙版是图层属性，AI 结果永远作为新图层插入，不覆盖原像素
-- **多渠道 AI**：RunningHub、GRS、阿吉 Aji、墨墨 Momo、OpenAI 共 7 个内置渠道，一套 UI 无感切换
-- **自定义渠道**：界面里直接接入你自己的接口，支持 OpenAI 兼容格式与私有协议，同步直出或轮询取结果都可
-- **无缝贴回**：AI 结果按选区蒙版合成，支持羽化与颜色匹配
+- **RunningHub**：工作流可保存与切换，参数从工作流详情实时拉取，无需手抄
+- **自定义渠道**：界面里接入任意 OpenAI 兼容接口，模型列表从对方站点自动获取
+- **无缝贴回**：AI 结果按选区蒙版合成，支持羽化与颜色匹配，宽高比不一致时居中裁切不变形
+- **丝滑缩放**：双指缩放围绕手指锚点，双击在适应窗口与 2 倍间切换
 - **PWA**：可安装到手机主屏，离线可用
 
 ## 快速开始
@@ -24,11 +26,14 @@ npm run dev -- --host
 ## 使用流程
 
 1. 点「导入」选择照片
-2. 用「套索」或「魔术棒」框选要修改的区域
+2. 用「矩形」「套索」或「魔术棒」框选要修改的区域
 3. 点右下角蓝色 **AI** 按钮
-4. 选渠道、填提示词、点「开始生成」
-5. 预览确认后点「插入为新图层」
-6. 点右上角下载图标导出
+4. 选渠道；若是 RunningHub，再选工作流并调参数
+5. 填提示词，点「开始生成」
+6. 预览确认后点「插入为新图层」
+7. 点右上角下载图标导出
+
+需要精修边缘时，用「蒙版」笔刷在选区或图层蒙版上涂抹，再重新生成。
 
 ## 配置 API Key
 
@@ -42,14 +47,16 @@ npm run dev -- --host
 
 ### RunningHub
 
-**只需要填工作流 ID**（在 RunningHub 打开你的工作流，从网址里取那段数字），配合 API Key 就能调用：
+**只需要填 API Key**，然后在 AI 面板的「工作流」下拉里粘贴工作流 ID 并保存。
 
-```
-POST /task/openapi/create
-{ "apiKey": "...", "workflowId": "1234567890", "nodeParams": { "prompt": "...", "image": "..." } }
-```
+- 工作流 ID 从 RunningHub 工作流页面的网址里取那段数字
+- 保存后会记住，可在下拉里随时切换
+- 选中后应用会自动拉取该工作流的全部参数（含中文说明、成功率、平均耗时）
+- 参数拉取失败时不放行提交，避免白跑一次扣算力
 
-应用 ID（appId）是可选的高级项，不填也能用。
+> 注意区分两个 ID：网址里的 **应用 ID**（appId，用于查询工作流详情）
+> 与提交任务用的 **工作流 ID**（workflowId）不一定相同。
+> 部分应用没有独立的 workflowId，此时直接以 appId 提交，应用会自动处理。
 
 ### 自定义渠道
 
@@ -65,6 +72,28 @@ POST /task/openapi/create
 | 高级 | 字段名映射（图片/提示词/模型/任务号）、鉴权头、dataURL 或表单 |
 
 保存后点「测试连接」可验证地址是否可达、鉴权是否被接受。
+
+模型列表通过 `GET /v1/models` 从对方站点实时获取，不再本地写死 —— 对方上新模型时无需改代码。
+
+### 图片代理
+
+个别渠道生成正常，但把结果图放在**未开放跨域的图床**上，浏览器取不回来（实测 aipais.de 的图在 `disk.aipais.de`）。
+
+在设置页「图片代理」里填一个自建转发地址（如 Cloudflare Worker）即可兜底：
+
+```js
+export default {
+  async fetch(request) {
+    const url = new URL(request.url).searchParams.get('url')
+    const resp = await fetch(url)
+    const r = new Response(resp.body, resp)
+    r.headers.set('Access-Control-Allow-Origin', '*')
+    return r
+  },
+}
+```
+
+留空则只用直连，不影响本来正常的渠道。
 
 ## 部署到 git（零成本）
 
@@ -125,17 +154,27 @@ jobs:
 
 ## 支持的 AI 渠道
 
-| 渠道 | Base URL | 说明 |
-|---|---|---|
-| RunningHub 国内 | `www.runninghub.cn` | 任务制，需轮询；需 appId |
-| RunningHub 国际 | `www.runninghub.ai` | 同上 |
-| GRS 国内 | `grsai.dakka.com.cn` | Gemini / Banana 系图像模型 |
-| GRS 国际 | `grsaiapi.com` | 同上 |
-| 阿吉 Aji | `ai.ajiai.top` | NewAPI 中转 |
-| 墨墨 Momo | `api.momoapi.icu` | 含两个备用地址，自动回退 |
-| OpenAI | `api.openai.com` | gpt-image 系 |
+**内置渠道**（开箱可用，Key 放在 `src/core/ai/local-keys.ts`，该文件已 gitignore 不入库）：
 
-所有渠道的路径、字段名与状态枚举均从两个 Photoshop 插件的代码中核实取得，非推测。
+| 渠道 | Base URL | 实测结果 |
+|---|---|---|
+| RunningHub 国内 | `www.runninghub.cn` | 已跑通，出图正常 |
+| RunningHub 国际 | `www.runninghub.ai` | 同上 |
+| 墨墨 | `api.momoapi.icu` | 跨域正常，返回 base64 |
+| XEM | `image.xem8k5.top` | 跨域正常，返回 base64 |
+| 办办 | `api.banban.plus` | 跨域正常 |
+| AIPais | `aipais.de` | 接口通，但结果图在 `disk.aipais.de` 无跨域，需配代理 |
+| bear | `ai.bearjia.cn` | 跨域被拦，需配代理 |
+
+**自定义渠道**：任意 OpenAI 兼容接口，模型从 `/v1/models` 自动获取。
+
+两条链路均已端到端实测通过：从选区、生成、预览到插入新图层。
+
+### 实测结论
+
+- `b64_json` 与 `url` 两种返回格式都支持 —— 早期只认 URL，会导致「生成成功但取不到图」
+- RunningHub 提交用 `webappId`（传 `appId` 会报 301），轮询必须带 `Authorization` 头（否则报 1602）
+- 多数模型会保持输入宽高比（实测输入 800×300 返回 2048×768），个别固定方形输出；贴回时对不一致的情况做居中裁切而非拉伸
 
 ## 技术栈
 
