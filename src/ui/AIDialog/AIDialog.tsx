@@ -17,6 +17,9 @@ import { createLayer } from '../../core/doc/document'
 import { uid } from '../../core/doc/types'
 import { fetchWorkflow, buildNodeInfoList, type WorkflowInfo, type WorkflowParam } from '../../core/ai/workflow'
 import { WorkflowParams } from './WorkflowParams'
+import { WorkflowPicker } from './WorkflowPicker'
+import type { SavedWorkflow } from '../../state/settings'
+import { defaultParamValues } from '../../core/ai/workflow'
 import type { AppSettings } from '../../state/settings'
 import './AIDialog.css'
 
@@ -32,6 +35,16 @@ interface Props {
   onPickModel: (model: string) => void
   /** 还没有自定义渠道时，引导用户去添加 */
   onAddChannel: () => void
+  /** 保存的工作流列表 */
+  savedWorkflows: SavedWorkflow[]
+  /** 选中某个工作流 */
+  onPickWorkflow: (webappId: string) => void
+  /** 保存一个工作流 ID（名称可后续补全） */
+  onSaveWorkflow: (webappId: string, name?: string, coverUrl?: string) => void
+  /** 删除一个工作流 */
+  onRemoveWorkflow: (webappId: string) => void
+  /** 拉到真实名称后回填 */
+  onLearnWorkflow: (webappId: string, name: string, coverUrl?: string) => void
 }
 
 const PRESETS = [
@@ -44,6 +57,7 @@ const PRESETS = [
 
 export function AIDialog({
   open, onClose, settings, apiKey, onNeedKey, onPickChannel, onPickModel, onAddChannel,
+  savedWorkflows, onPickWorkflow, onSaveWorkflow, onRemoveWorkflow, onLearnWorkflow,
 }: Props) {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
@@ -57,9 +71,9 @@ export function AIDialog({
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState('')
 
-  // RunningHub 工作流参数
+  // RunningHub 工作流
   const [wfInfo, setWfInfo] = useState<WorkflowInfo | null>(null)
-  const [wfParams, setWfParams] = useState<WorkflowParam[]>([])
+  const [wfValues, setWfValues] = useState<Record<string, string>>({})
   const [wfLoading, setWfLoading] = useState(false)
   const [wfError, setWfError] = useState('')
 
@@ -95,16 +109,17 @@ export function AIDialog({
    */
   const loadWorkflow = useCallback(async () => {
     if (!open) return
-    if (channel?.family !== 'runninghub') { setWfInfo(null); setWfParams([]); setWfError(''); return }
+    if (channel?.family !== 'runninghub') { setWfInfo(null); setWfValues({}); setWfError(''); return }
 
-    const wfId = settings.runningHubWorkflowId?.trim()
+    // 优先用选中的工作流，退回到设置里手填的 ID
+    const wfId = (settings.activeWorkflowId || settings.runningHubWorkflowId || '').trim()
     if (!wfId) {
-      setWfInfo(null); setWfParams([])
-      setWfError('请先在设置里填写工作流 ID')
+      setWfInfo(null); setWfValues({})
+      setWfError('请先选择或添加一个工作流')
       return
     }
     if (!apiKey) {
-      setWfInfo(null); setWfParams([])
+      setWfInfo(null); setWfValues({})
       setWfError('请先填写该渠道的 API Key')
       return
     }
@@ -114,15 +129,18 @@ export function AIDialog({
     try {
       const info = await fetchWorkflow(wfId, apiKey, channel.apiUrl)
       setWfInfo(info)
-      setWfParams(info.params)
+      // 用工作流自带默认值初始化，用户改动只覆盖对应项
+      setWfValues(defaultParamValues(info.params))
+      // 拿到真实名称后回填到保存列表，方便下次识别
+      onLearnWorkflow(info.webappId, info.name, info.coverUrl)
     } catch (e) {
       setWfInfo(null)
-      setWfParams([])
+      setWfValues({})
       setWfError((e as Error)?.message || '获取工作流参数失败')
     } finally {
       setWfLoading(false)
     }
-  }, [open, channel, settings.runningHubWorkflowId, apiKey])
+  }, [open, channel, settings.activeWorkflowId, settings.runningHubWorkflowId, apiKey, onLearnWorkflow])
 
   useEffect(() => { loadWorkflow() }, [loadWorkflow])
 
@@ -165,8 +183,16 @@ export function AIDialog({
   const handleGenerate = useCallback(async () => {
     if (!doc || !sourceBitmap) { setError('请先导入图片'); return }
     if (!selection || !selBounds || selBounds.w === 0) { setError('请先框选要修改的区域'); return }
-    if (!prompt.trim()) { setError('请输入提示词'); return }
     if (!apiKey) { onNeedKey(channel.id); return }
+
+    // RunningHub 必须先拿到工作流参数才允许提交 ——
+    // 参数没读到就提交，等于用错的工作流盲跑，会白扣算力
+    const isRH = channel?.family === 'runninghub'
+    if (isRH && !wfInfo) {
+      setError(wfLoading ? '正在读取工作流参数，请稍候' : (wfError || '请先选择工作流'))
+      return
+    }
+    if (!isRH && !prompt.trim()) { setError('请输入提示词'); return }
 
     setBusy(true)
     setError('')
@@ -184,14 +210,19 @@ export function AIDialog({
         channel,
         apiKey,
         request: {
-          prompt: prompt.trim(),
+          // RunningHub 走工作流，提示词由参数面板里的提示词字段决定；
+          // 自定义渠道直接吃 prompt
+          prompt: isRH ? '' : prompt.trim(),
           imageDataUrl: dataUrl,
           model: settings.activeModel || channel.defaultModel || channel.imageModels[0] || '',
           aspectRatio: settings.aspectRatio,
           resolution: settings.resolution,
           extra: {
-            appId: settings.runningHubAppId,
-            workflowId: settings.runningHubWorkflowId,
+            // RunningHub：提交应用 ID 与逐节点参数
+            // 以工作流详情为准：有 workflowId 就传，没有就靠 appId
+            appId: isRH ? (wfInfo?.webappId || settings.runningHubAppId) : settings.runningHubAppId,
+            workflowId: isRH ? (wfInfo?.workflowId || '') : settings.runningHubWorkflowId,
+            nodeInfoList: isRH && wfInfo ? buildNodeInfoList(wfInfo.params, wfValues) : undefined,
             useEdits: settings.openaiUseEdits,
             custom: channel.custom,
           },
@@ -281,6 +312,38 @@ export function AIDialog({
             </button>
           )}
         </div>
+
+        {/* RunningHub：工作流选择与参数 */}
+        {channel?.family === 'runninghub' && (
+          <>
+            <div className="ai-field">
+              <label className="ai-label">工作流</label>
+              <WorkflowPicker
+                workflows={savedWorkflows}
+                activeId={settings.activeWorkflowId}
+                onPick={onPickWorkflow}
+                onAdd={onSaveWorkflow}
+                onRemove={onRemoveWorkflow}
+              />
+              {wfLoading && (
+                <div className="ai-status">
+                  <Loader2 size={15} className="spinning" />
+                  正在读取工作流参数
+                </div>
+              )}
+              {wfError && <div className="ai-hint-warn">{wfError}</div>}
+            </div>
+
+            {wfInfo && (
+              <WorkflowParams
+                info={wfInfo}
+                values={wfValues}
+                onChange={(nodeId, v) => setWfValues((prev) => ({ ...prev, [nodeId]: v }))}
+                onReset={() => setWfValues(defaultParamValues(wfInfo.params))}
+              />
+            )}
+          </>
+        )}
 
         {/* 模型：从对方网站自动拉取；RunningHub 不需要选模型 */}
         {channel.family !== 'runninghub' && (
@@ -381,10 +444,15 @@ export function AIDialog({
             <Button
               variant="primary"
               onClick={handleGenerate}
-              disabled={busy || !selBounds || selBounds.w === 0}
+              disabled={
+                busy ||
+                !selBounds || selBounds.w === 0 ||
+                // RunningHub 参数没就绪就不让点，避免盲跑白扣算力
+                (channel?.family === 'runninghub' && (!wfInfo || wfLoading))
+              }
               icon={busy ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
             >
-              {busy ? '生成中' : '开始生成'}
+              {busy ? '生成中' : (channel?.family === 'runninghub' && wfLoading ? '读取工作流中' : '开始生成')}
             </Button>
           )}
         </div>

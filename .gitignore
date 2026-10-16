@@ -31,3 +31,8 @@ pnpm-debug.log*
 
 # 本机密钥，绝不入库（示例文件 local-keys.example.ts 要保留）
 src/core/ai/local-keys.ts
+
+# 临时探测脚本（可能含密钥，永不入库）
+.*.mjs
+.*.tmp.json
+.verify/

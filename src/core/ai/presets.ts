@@ -21,7 +21,7 @@
  */
 
 import type { CustomSpec } from './types'
-import { LOCAL_KEYS, LOCAL_RUNNINGHUB } from './local-keys'
+import { LOCAL_KEYS, LOCAL_RUNNINGHUB, LOCAL_WORKFLOWS } from './local-keys'
 
 export interface ChannelPreset {
   /** 稳定标识，用于生成渠道 id */
@@ -71,19 +71,35 @@ export const CHANNEL_PRESETS: ChannelPreset[] = [
     spec: OPENAI_COMPAT,
   },
   {
-    key: 'ergouzi',
-    label: '二狗',
-    apiUrl: 'https://ergouzi.life',
-    defaultModel: 'gpt-image-2',
-    apiKey: LOCAL_KEYS.ergouzi,
-    spec: OPENAI_COMPAT,
-  },
-  {
     key: 'aipais',
     label: 'AIPais',
     apiUrl: 'https://aipais.de',
     defaultModel: 'gpt-image-2.5-sunburst',
     apiKey: LOCAL_KEYS.aipais,
+    spec: OPENAI_COMPAT,
+  },
+  {
+    key: 'banban',
+    label: '办办',
+    apiUrl: 'https://api.banban.plus',
+    defaultModel: 'gpt-image-2.5-sunburst',
+    apiKey: LOCAL_KEYS.banban,
+    spec: OPENAI_COMPAT,
+  },
+  {
+    key: 'bear',
+    label: 'bear',
+    apiUrl: 'https://ai.bearjia.cn',
+    defaultModel: 'gpt-image-2.5',
+    apiKey: LOCAL_KEYS.bear,
+    spec: OPENAI_COMPAT,
+  },
+  {
+    key: 'xem',
+    label: 'XEM',
+    apiUrl: 'https://image.xem8k5.top',
+    defaultModel: 'gpt-image-2.5-sunburst',
+    apiKey: LOCAL_KEYS.xem,
     spec: OPENAI_COMPAT,
   },
   {
@@ -154,6 +170,9 @@ export const CHANNEL_PRESETS: ChannelPreset[] = [
 
 /** RunningHub 的本机配置（Key 同样来自 local-keys.ts） */
 export const RUNNINGHUB_DEFAULTS = LOCAL_RUNNINGHUB
+
+/** 已保存的工作流，开箱即可切换 */
+export const WORKFLOW_DEFAULTS = LOCAL_WORKFLOWS
 
 /** Gemini 原生协议，供用户按需选择 */
 export const GEMINI_SPEC = GEMINI_NATIVE

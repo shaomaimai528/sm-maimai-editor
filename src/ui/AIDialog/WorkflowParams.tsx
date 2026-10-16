@@ -1,107 +1,129 @@
 /**
- * 工作流参数编辑器
+ * RunningHub 工作流参数面板
  *
- * 参数由 RunningHub 工作流自身定义，数量和类型都不固定：
- * 可能是提示词文本框、图片槽、数值滑杆、下拉选项、开关。
- * 这里按类型渲染对应控件，用户改完直接作为 nodeInfoList 提交。
+ * 参数来自 POST /api/webapp/detail 的 inputNodes，
+ * 已实测的真实字段：nodeId / nodeName / fieldName / fieldType / fieldValue / descriptionCn
+ *
+ * fieldType 取值与对应控件：
+ *   IMAGE   —— 复用主图，不单独上传（面板里只做提示）
+ *   FLOAT   —— 数字输入，步长 0.05
+ *   INT     —— 整数输入，步长 1
+ *   BOOLEAN —— 开关
+ *   STRING  —— 多行文本（提示词通常很长）
  */
-import { Image as ImageIcon, Type, Hash, List, ToggleLeft } from 'lucide-react'
-import type { WorkflowParam } from '../../core/ai/workflow'
+
+import { Hash, Image as ImageIcon, MessageSquare, SlidersHorizontal, ToggleLeft } from 'lucide-react'
+import type { WorkflowInfo, WorkflowParam } from '../../core/ai/workflow'
+import { isImageParam } from '../../core/ai/workflow'
 import './WorkflowParams.css'
 
 interface Props {
-  params: WorkflowParam[]
-  onChange: (params: WorkflowParam[]) => void
+  info: WorkflowInfo
+  values: Record<string, string>
+  onChange: (nodeId: string, value: string) => void
+  /** 重置为工作流默认值 */
+  onReset: () => void
 }
 
-export function WorkflowParams({ params, onChange }: Props) {
-  if (!params.length) return null
+/** 按参数类型选图标 */
+function iconFor(p: WorkflowParam) {
+  if (isImageParam(p)) return ImageIcon
+  const t = p.fieldType.toUpperCase()
+  if (t === 'FLOAT' || t === 'INT') return SlidersHorizontal
+  if (t === 'BOOLEAN') return ToggleLeft
+  if (p.label.includes('提示词') || p.label.includes('prompt')) return MessageSquare
+  return Hash
+}
 
-  const update = (i: number, value: WorkflowParam['value']) => {
-    const next = params.slice()
-    next[i] = { ...next[i], value }
-    onChange(next)
+export function WorkflowParams({ info, values, onChange, onReset }: Props) {
+  if (!info.params.length) {
+    return (
+      <div className="wf-empty">
+        该工作流没有可调参数，上传图片后直接运行即可
+      </div>
+    )
   }
 
+  // 图片参数由主图自动带入，不在面板里重复展示
+  const editable = info.params.filter((p) => !isImageParam(p))
+  const imageParams = info.params.filter(isImageParam)
+
   return (
-    <div className="wfp">
-      <div className="wfp-head">
-        <span>工作流参数</span>
-        <span className="wfp-count">{params.length} 项</span>
+    <div className="wf-params">
+      <div className="wf-head">
+        <div className="wf-title-row">
+          <span className="wf-name">{info.name}</span>
+          <button className="wf-reset" onClick={onReset} type="button">恢复默认</button>
+        </div>
+
+        <div className="wf-meta">
+          {info.tags?.slice(0, 3).map((t) => (
+            <span key={t} className="wf-tag">{t}</span>
+          ))}
+          {info.successRate && <span className="wf-stat">成功率 {info.successRate}%</span>}
+          {info.avgSeconds && <span className="wf-stat">约 {info.avgSeconds} 秒</span>}
+        </div>
+
+        {imageParams.length > 0 && (
+          <div className="wf-auto-note">
+            <ImageIcon size={13} />
+            已自动使用你框选的区域作为主图
+          </div>
+        )}
       </div>
 
-      {params.map((p, i) => (
-        <div className="wfp-field" key={`${p.nodeId}:${p.fieldName}:${i}`}>
-          <label className="wfp-label">
-            <Icon type={p.type} />
-            <span className="wfp-name">{p.label}</span>
-            {p.required && <span className="wfp-req">必填</span>}
-          </label>
+      <div className="wf-list">
+        {editable.map((p) => {
+          const Icon = iconFor(p)
+          const t = p.fieldType.toUpperCase()
+          const v = values[p.nodeId] ?? p.value
 
-          {p.type === 'image' && (
-            <div className="wfp-image">
-              <ImageIcon size={15} />
-              <span>自动使用当前选区图像</span>
+          return (
+            <div className="wf-item" key={p.nodeId + p.fieldName}>
+              <label className="wf-label">
+                <Icon size={14} className="wf-icon" />
+                <span>{p.label || p.fieldName}</span>
+              </label>
+
+              {t === 'BOOLEAN' ? (
+                <button
+                  className="wf-switch"
+                  data-on={String(v) === 'true'}
+                  onClick={() => onChange(p.nodeId, String(v) === 'true' ? 'false' : 'true')}
+                  type="button"
+                >
+                  <span className="wf-knob" />
+                </button>
+              ) : t === 'FLOAT' || t === 'INT' ? (
+                <input
+                  className="wf-input wf-number"
+                  type="number"
+                  step={t === 'INT' ? 1 : 0.05}
+                  value={v}
+                  onChange={(e) => onChange(p.nodeId, e.target.value)}
+                />
+              ) : String(v).length > 40 || p.label.includes('提示词') ? (
+                <textarea
+                  className="wf-input wf-textarea"
+                  rows={3}
+                  value={v}
+                  placeholder={p.label}
+                  onChange={(e) => onChange(p.nodeId, e.target.value)}
+                />
+              ) : (
+                <input
+                  className="wf-input"
+                  value={v}
+                  placeholder={p.label}
+                  onChange={(e) => onChange(p.nodeId, e.target.value)}
+                />
+              )}
+
+              {p.description && <div className="wf-hint">{p.description}</div>}
             </div>
-          )}
-
-          {p.type === 'text' && (
-            <textarea
-              className="wfp-input"
-              rows={2}
-              value={String(p.value)}
-              onChange={(e) => update(i, e.target.value)}
-            />
-          )}
-
-          {p.type === 'number' && (
-            <div className="wfp-num">
-              <input
-                type="range"
-                min={p.min ?? 0}
-                max={p.max ?? 100}
-                step={p.step ?? 1}
-                value={Number(p.value)}
-                onChange={(e) => update(i, Number(e.target.value))}
-              />
-              <span className="wfp-numval">{String(p.value)}</span>
-            </div>
-          )}
-
-          {p.type === 'select' && (
-            <select
-              className="wfp-input"
-              value={String(p.value)}
-              onChange={(e) => update(i, e.target.value)}
-            >
-              <option value="">请选择</option>
-              {(p.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          )}
-
-          {p.type === 'boolean' && (
-            <label className="wfp-switch">
-              <input
-                type="checkbox"
-                checked={!!p.value}
-                onChange={(e) => update(i, e.target.checked)}
-              />
-              <span>{p.value ? '开启' : '关闭'}</span>
-            </label>
-          )}
-
-          {p.description && <div className="wfp-desc">{p.description}</div>}
-        </div>
-      ))}
+          )
+        })}
+      </div>
     </div>
   )
-}
-
-function Icon({ type }: { type: WorkflowParam['type'] }) {
-  const size = 14
-  if (type === 'image') return <ImageIcon size={size} />
-  if (type === 'number') return <Hash size={size} />
-  if (type === 'select') return <List size={size} />
-  if (type === 'boolean') return <ToggleLeft size={size} />
-  return <Type size={size} />
 }

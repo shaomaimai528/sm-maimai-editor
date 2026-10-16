@@ -121,6 +121,74 @@ export function extractImageUrl(obj: unknown, depth = 0): string {
 }
 
 /* ------------------------------------------------------------------
+ * base64 图片提取
+ *
+ * 实测：XEM / 办办 / 墨墨 等渠道返回的是 { data:[{ b64_json: "iVBORw0..." }] }，
+ * 而不是图片 URL。早期只认 URL 会导致"任务成功但取不到图"。
+ * ------------------------------------------------------------------ */
+
+/** 可能存放 base64 图片的字段名 */
+const B64_KEYS = [
+  'b64_json', 'b64Json', 'b64', 'imageBase64', 'image_base64',
+  'base64', 'base64Image', 'imageb64', 'image_b64',
+]
+
+/**
+ * 把 base64 字符串规整成 dataURL
+ * 对方可能已带 data: 前缀，也可能不带，两种都要认
+ */
+export function toDataUrl(raw: string): string {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  if (s.startsWith('data:')) return s
+  // 按文件头判断类型，默认 png
+  const head = s.slice(0, 8)
+  const mime = head.startsWith('iVBOR') ? 'image/png'
+    : head.startsWith('/9j/') ? 'image/jpeg'
+    : head.startsWith('UklGR') ? 'image/webp'
+    : 'image/png'
+  return `data:${mime};base64,${s}`
+}
+
+/** 判断一段字符串是否像 base64 图片 */
+function looksLikeBase64Image(s: string): boolean {
+  if (s.length < 128) return false
+  if (s.startsWith('data:image/')) return true
+  // PNG / JPEG / WebP / GIF 的 base64 开头
+  return /^(iVBOR|\/9j\/|UklGR|R0lGOD)/.test(s)
+}
+
+/** 在任意嵌套结构里找出第一个 base64 图片，返回 dataURL */
+export function extractBase64Image(obj: unknown, depth = 0): string {
+  if (obj == null || depth > 7) return ''
+
+  if (typeof obj === 'string') {
+    return looksLikeBase64Image(obj) ? toDataUrl(obj) : ''
+  }
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = extractBase64Image(item, depth + 1)
+      if (found) return found
+    }
+    return ''
+  }
+
+  if (typeof obj !== 'object') return ''
+
+  const o = obj as Record<string, unknown>
+  for (const k of B64_KEYS) {
+    const v = o[k]
+    if (typeof v === 'string' && looksLikeBase64Image(v)) return toDataUrl(v)
+  }
+  for (const k of CONTAINER_KEYS) {
+    const found = extractBase64Image(o[k], depth + 1)
+    if (found) return found
+  }
+  return ''
+}
+
+/* ------------------------------------------------------------------
  * 错误信息提取
  * ------------------------------------------------------------------ */
 

@@ -15,7 +15,7 @@ import type { Provider, SubmitRequest, SubmitOutcome, PollResult, Balance, Custo
 import { AIError } from './types'
 import {
   fetchJson, extractTaskId, extractImageUrl, extractMessage,
-  normalizeStatus, findStatus, dataUrlToBlob,
+  normalizeStatus, findStatus, dataUrlToBlob, extractBase64Image,
 } from './extract'
 
 /** 提取自定义配置，带默认值 */
@@ -84,7 +84,8 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
     res = await fetchJson(url, { method: 'POST', headers: h, body: form }, 180_000, '自定义渠道')
   }
 
-  const imgUrl = extractImageUrl(res)
+  // 图片可能以 URL 或 base64 两种形式返回，都要认
+  const imgUrl = extractImageUrl(res) || extractBase64Image(res)
   const taskId = extractTaskId(res)
 
   // 轮询模式：优先认 taskId
@@ -125,7 +126,7 @@ async function poll(taskId: string, apiKey: string, baseUrl: string): Promise<Po
   }, 30_000, '自定义渠道')
 
   const status = normalizeStatus(findStatus(res))
-  const imgUrl = extractImageUrl(res)
+  const imgUrl = extractImageUrl(res) || extractBase64Image(res)
 
   if (status === 'failed') {
     return { status: 'failed', message: extractMessage(res) || '任务执行失败' }

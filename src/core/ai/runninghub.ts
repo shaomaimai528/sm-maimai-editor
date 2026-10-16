@@ -72,14 +72,19 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
 
   const attempts: Array<() => Promise<SubmitOutcome>> = []
 
-  // 路径 1：用户提供了 appId —— 走 AI App 接口
+  // 路径 1：有 appId —— 走 AI App 接口（多数应用走这条）
   if (appId) {
-    const nodeInfoList = (req.extra?.nodeInfoList as unknown[]) || buildNodeInfoList(req, imageRef)
+    const provided = req.extra?.nodeInfoList as unknown[] | undefined
+    const nodeInfoList = provided?.length
+      ? injectImage(provided, imageRef)
+      : buildNodeInfoList(req, imageRef)
+
     attempts.push(async () => {
       const res = await fetchJson(`${baseUrl}/task/openapi/ai-app/run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, appId, nodeInfoList }),
+        // 实测：该接口要的是 webappId，传 appId 会返回 301 "webappId cannot be null"
+        body: JSON.stringify({ apiKey, webappId: appId, nodeInfoList }),
       }, 180_000, 'RunningHub')
       const taskId = extractTaskId(res)
       if (!taskId) throw new AIError(extractMessage(res) || '任务已创建但未返回 taskId')
@@ -119,12 +124,39 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
   return tryEach(attempts, (i, e) => console.warn('[RunningHub] 提交变体失败', i, (e as Error)?.message))
 }
 
-/** 把提示词与图片组装成 AI App 需要的节点参数列表 */
+/**
+ * 把上传后的文件标识注入到图片参数上
+ *
+ * 参数列表来自工作流详情的 inputNodes（nodeId 是真实的，如 164），
+ * 但那里的 fieldValue 只是示例文件名 example.png，
+ * 必须替换成本次上传得到的 token，否则工作流会找不到图。
+ */
+function injectImage(
+  list: unknown[],
+  imageRef: string,
+): Array<Record<string, unknown>> {
+  return (list as Array<Record<string, unknown>>).map((item) => {
+    const type = String(item?.fieldType || '').toUpperCase()
+    const field = String(item?.fieldName || '').toLowerCase()
+    const node = String(item?.nodeName || '').toLowerCase()
+    const isImageSlot =
+      type === 'IMAGE' || field === 'image' || field === 'imageurl' || node === 'loadimage'
+    if (isImageSlot && imageRef) {
+      return { ...item, fieldValue: imageRef }
+    }
+    return item
+  })
+}
+
+/** 组装默认的节点参数列表（当界面未提供时使用） */
 function buildNodeInfoList(req: SubmitRequest, imageRef: string): unknown[] {
   const list: Array<Record<string, unknown>> = []
-  list.push({ nodeId: 'prompt', fieldName: 'text', fieldValue: req.prompt })
+  // 这两个 nodeId 是兜底值，仅在工作流详情拿不到时使用
+  if (req.prompt) {
+    list.push({ nodeId: 'prompt', fieldName: 'text', fieldValue: req.prompt })
+  }
   if (imageRef) {
-    list.push({ nodeId: 'image', fieldName: 'image', fieldValue: imageRef })
+    list.push({ nodeId: '164', nodeName: 'LoadImage', fieldName: 'image', fieldValue: imageRef, fieldType: 'IMAGE' })
   }
   return list
 }
@@ -134,10 +166,12 @@ async function poll(taskId: string, apiKey: string, baseUrl: string): Promise<Po
   const body = { apiKey, taskId }
 
   const res = await tryEach([
+    // 实测：该接口必须在 Header 里带 Authorization，且 body 里也要 apiKey，
+    // 只传 taskId 会返回 1602 HEADER_API_KEY_NOT_FOUND，导致永远轮询不到结果。
     () => fetchJson(`${baseUrl}/openapi/v2/query`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskId }),
+      body: JSON.stringify({ apiKey, taskId }),
     }, 30_000, 'RunningHub'),
     () => fetchJson(`${baseUrl}/task/openapi/outputs`, {
       method: 'POST',

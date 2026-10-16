@@ -6,7 +6,7 @@
  */
 
 import { get, set } from 'idb-keyval'
-import { CHANNEL_PRESETS, PRESET_ID_PREFIX, RUNNINGHUB_DEFAULTS } from '../core/ai/presets'
+import { CHANNEL_PRESETS, PRESET_ID_PREFIX, RUNNINGHUB_DEFAULTS, WORKFLOW_DEFAULTS } from '../core/ai/presets'
 
 export interface ChannelCredential {
   channelId: string
@@ -55,6 +55,18 @@ export interface AppSettings {
   modelCacheByChannel: Record<string, string[]>
   /** 是否每次打开都回到默认渠道，false 则沿用上次用的 */
   rememberLastChannel: boolean
+  /** 保存的 RunningHub 工作流，可切换 */
+  savedWorkflows: SavedWorkflow[]
+  /** 当前选中的工作流 ID */
+  activeWorkflowId: string
+}
+
+/** 用户保存的 RunningHub 工作流 */
+export interface SavedWorkflow {
+  webappId: string
+  name: string
+  coverUrl?: string
+  savedAt: number
 }
 
 /**
@@ -110,6 +122,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastModelByChannel: {},
   modelCacheByChannel: {},
   rememberLastChannel: true,
+  savedWorkflows: [],
+  activeWorkflowId: '',
 }
 
 const KEY = 'app-settings-v1'
@@ -122,15 +136,23 @@ const KEY = 'app-settings-v1'
  * 用户随时可在设置里改或删。
  */
 function seedPresets(s: AppSettings): AppSettings {
-  if (s.credentials.length || s.userChannels.length) return s
+  // 只补缺失的部分，不覆盖用户已有的配置。
+  // 早期版本用 "已有数据就整体跳过"，会导致后来新增的预置渠道永远进不来。
+  const have = new Set(s.userChannels.map((c) => c.id))
+  const haveKey = new Set(s.credentials.filter((c) => c.apiKey).map((c) => c.channelId))
 
-  const userChannels: UserChannelConfig[] = []
-  const credentials: ChannelCredential[] = []
-  const lastModelByChannel: Record<string, string> = {}
+  const userChannels: UserChannelConfig[] = [...(s.userChannels || [])]
+  const credentials: ChannelCredential[] = [...(s.credentials || [])]
+  const lastModelByChannel: Record<string, string> = { ...(s.lastModelByChannel || {}) }
 
   for (const p of CHANNEL_PRESETS) {
     if (!p.apiKey) continue
     const id = PRESET_ID_PREFIX + p.key
+    if (have.has(id)) {
+      // 渠道已存在，只补 Key（用户可能清空过）
+      if (!haveKey.has(id)) credentials.push({ channelId: id, apiKey: p.apiKey })
+      continue
+    }
     userChannels.push({
       id,
       label: p.label,
@@ -152,20 +174,29 @@ function seedPresets(s: AppSettings): AppSettings {
   }
 
   // RunningHub 的 Key 与工作流也一并带入（来自同一份 HHPS 配置）
-  credentials.push({
-    channelId: 'runninghub-cn',
-    apiKey: RUNNINGHUB_DEFAULTS.apiKey,
-  })
+  if (RUNNINGHUB_DEFAULTS.apiKey && !haveKey.has('runninghub-cn')) {
+    credentials.push({ channelId: 'runninghub-cn', apiKey: RUNNINGHUB_DEFAULTS.apiKey })
+  }
+  // 工作流列表：合并用户已有的与预置的，按 webappId 去重
+  const seen = new Set((s.savedWorkflows || []).map((w) => w.webappId))
+  const savedWorkflows: SavedWorkflow[] = [
+    ...(s.savedWorkflows || []),
+    ...WORKFLOW_DEFAULTS
+      .filter((w) => !seen.has(w.webappId))
+      .map((w) => ({ webappId: w.webappId, name: w.name, savedAt: Date.now() })),
+  ]
 
   return {
     ...s,
     userChannels,
     credentials,
     lastModelByChannel,
+    savedWorkflows,
+    activeWorkflowId: s.activeWorkflowId || savedWorkflows[0]?.webappId || '',
     runningHubWorkflowId: s.runningHubWorkflowId || RUNNINGHUB_DEFAULTS.workflowId,
-    // 有可用渠道时直接切过去，省得第一次打开还得手动选
-    activeChannelId: userChannels.length ? userChannels[0].id : s.activeChannelId,
-    activeModel: userChannels.length ? lastModelByChannel[userChannels[0].id] : s.activeModel,
+    // 只在用户还没选过渠道时才替他选第一个，避免覆盖已有偏好
+    activeChannelId: s.activeChannelId || userChannels[0]?.id || DEFAULT_SETTINGS.activeChannelId,
+    activeModel: s.activeModel || (userChannels.length ? lastModelByChannel[userChannels[0].id] : ''),
   }
 }
 

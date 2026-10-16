@@ -1,252 +1,195 @@
 /**
- * RunningHub 工作流参数获取
+ * RunningHub 工作流
  *
- * 用户填工作流 ID，这里取回该工作流的可调参数（提示词、图片、数值滑杆等），
- * 供界面上直接编辑。接口路径与字段名从像素起子插件中核实取得。
+ * 接口已用真实 Key 实测（webappId 2024785405106724865）：
+ *   POST {base}/api/webapp/detail
+ *   body { apiKey, webappId }
+ *   → { code:0, data:{ id, workflowId, name, inputNodes[], description, ... } }
  *
- * 端点候选顺序照搬插件：detail → getDetail → info → getInfo → query → get
- * 参数名依次尝试 workflowId / webappId / appId / id
+ * 两个 ID 是不同的东西，容易混淆：
+ *   webappId   —— 应用 ID，用户从浏览器地址栏复制的那个（detail 接口用它查询）
+ *   workflowId —— 工作流 ID，提交任务时用
+ *   例：webappId=2024785405106724865 对应 workflowId=2024776560175222785
+ *
+ * inputNodes 才是参数来源，字段为：
+ *   nodeId / nodeName / fieldName / fieldType / fieldValue
+ *   descriptionCn（中文说明）/ descriptionEn
+ * fieldType 取值：IMAGE / FLOAT / INT / STRING / BOOLEAN
  */
 
+import type { AIError as _AIError } from './types'
 import { AIError } from './types'
 
-/** 单个可调参数 */
 export interface WorkflowParam {
-  /** 提交时用的节点 ID */
   nodeId: string
-  /** 参数字段名，如 text / image / seed */
+  nodeName: string
   fieldName: string
-  /** 界面显示名 */
+  fieldType: string
+  /** 默认值 */
+  value: string
+  /** 中文说明，优先展示 */
   label: string
-  /** 控件类型 */
-  type: 'text' | 'image' | 'number' | 'select' | 'boolean'
-  /** 当前值 */
-  value: string | number | boolean
-  /** number 类型的范围 */
-  min?: number
-  max?: number
-  step?: number
-  /** select 类型的可选项 */
-  options?: string[]
-  /** 是否必填 */
-  required?: boolean
-  /** 描述文字 */
   description?: string
 }
 
 export interface WorkflowInfo {
-  id: string
+  webappId: string
+  /** 提交任务时实际要用的 ID，与 webappId 不同 */
+  workflowId: string
   name: string
-  description: string
+  description?: string
+  coverUrl?: string
   params: WorkflowParam[]
-  /** 原始返回，便于排查 */
-  raw: unknown
+  /** 历史成功率（百分比字符串） */
+  successRate?: string
+  /** 平均耗时（秒） */
+  avgSeconds?: string
+  tags?: string[]
 }
 
-const DETAIL_PATHS = [
-  '/api/webapp/detail',
-  '/api/webapp/getDetail',
-  '/api/webapp/info',
-  '/api/webapp/getInfo',
-  '/api/webapp/query',
-  '/api/webapp/get',
-  '/uc/openapi/app',
-  '/uc/openapi/community/app',
-]
+/** fieldData 里标记为图片上传的字段 */
+const IMAGE_TYPES = new Set(['IMAGE'])
 
-const ID_KEYS = ['workflowId', 'webappId', 'appId', 'id']
+export function isImageParam(p: WorkflowParam): boolean {
+  return IMAGE_TYPES.has(p.fieldType.toUpperCase())
+}
 
-/** 递归搜索指定键名的值 —— 各接口返回结构差异极大，只能宽进 */
-function findDeep(obj: unknown, keys: string[], depth = 0): unknown {
-  if (depth > 6 || !obj || typeof obj !== 'object') return undefined
-  const o = obj as Record<string, unknown>
-  for (const k of keys) {
-    if (o[k] !== undefined && o[k] !== null && o[k] !== '') return o[k]
-  }
-  for (const v of Object.values(o)) {
-    const r = findDeep(v, keys, depth + 1)
-    if (r !== undefined) return r
+/** 把 detail 返回的节点转成界面用的参数 */
+function toParams(nodes: any[]): WorkflowParam[] {
+  if (!Array.isArray(nodes)) return []
+  return nodes.map((n) => ({
+    nodeId: String(n?.nodeId ?? ''),
+    nodeName: String(n?.nodeName ?? ''),
+    fieldName: String(n?.fieldName ?? ''),
+    fieldType: String(n?.fieldType ?? 'STRING').toUpperCase(),
+    value: n?.fieldValue == null ? '' : String(n.fieldValue),
+    label: String(n?.descriptionCn || n?.description || n?.fieldName || ''),
+    description: n?.descriptionEn ? String(n.descriptionEn) : undefined,
+  })).filter((p) => p.nodeId && p.fieldName)
+}
+
+/** 从封面数组里取第一张 */
+function firstCover(d: any): string | undefined {
+  for (const k of ['covers', 'chineseCovers', 'englishCovers']) {
+    const arr = d?.[k]
+    if (Array.isArray(arr) && arr.length) {
+      const c = arr[0]
+      const url = typeof c === 'string' ? c : (c?.url || c?.coverUrl || c?.imageUrl)
+      if (url) return String(url)
+    }
   }
   return undefined
 }
 
-/** 递归找出所有参数数组 —— 插件里列了十几种可能的容器路径 */
-function findParamArrays(obj: unknown, depth = 0, out: unknown[][] = []): unknown[][] {
-  if (depth > 6 || !obj || typeof obj !== 'object') return out
-  const o = obj as Record<string, unknown>
-  for (const key of [
-    'nodeInfoList', 'inputs', 'params', 'inputParams', 'nodeList', 'nodes',
-    'nodeInfo', 'nodeInfos', 'nodeInfoList', 'fields', 'parameters',
-  ]) {
-    const v = o[key]
-    if (Array.isArray(v) && v.length && typeof v[0] === 'object') out.push(v)
-  }
-  for (const v of Object.values(o)) findParamArrays(v, depth + 1, out)
-  return out
-}
-
-/** 把控件类型字符串归一到我们支持的几种 */
-function normalizeType(raw: unknown, fieldName: string): WorkflowParam['type'] {
-  const t = String(raw ?? '').toLowerCase()
-  const f = fieldName.toLowerCase()
-  if (t.includes('image') || t.includes('file') || t.includes('img')) return 'image'
-  if (f.includes('image') || f === 'img' || f.includes('photo')) return 'image'
-  if (t.includes('number') || t.includes('int') || t.includes('float') || t.includes('slider')) return 'number'
-  if (f.includes('seed') || f.includes('step') || f.includes('cfg') || f.includes('denoise')) return 'number'
-  if (t === 'list' || t.includes('select') || t.includes('enum') || t.includes('option')) return 'select'
-  if (t.includes('bool') || t.includes('checkbox') || t.includes('toggle')) return 'boolean'
-  return 'text'
-}
-
-/** 从一条原始记录解析出统一的参数结构 */
-function parseParam(item: unknown): WorkflowParam | null {
-  if (!item || typeof item !== 'object') return null
-  const o = item as Record<string, any>
-
-  const nodeId = String(o.nodeId ?? o.nodeID ?? o.node_id ?? o.id ?? '')
-  const fieldName = String(o.fieldName ?? o.field ?? o.name ?? o.key ?? o.paramKey ?? '')
-  if (!fieldName) return null
-
-  // 界面名优先取中文描述
-  const label = String(
-    o.description ?? o.label ?? o.title ?? o.name ?? fieldName
-  ).slice(0, 40)
-
-  const type = normalizeType(o.fieldType ?? o.type ?? o.valueType, fieldName)
-
-  let value: string | number | boolean = ''
-  const raw = o.fieldValue ?? o.value ?? o.defaultValue ?? o.default ?? ''
-  if (type === 'number') {
-    const n = Number(raw)
-    value = Number.isFinite(n) ? n : 0
-  } else if (type === 'boolean') {
-    value = raw === true || raw === 'true' || raw === 1 || raw === '1'
-  } else {
-    value = raw === undefined || raw === null ? '' : String(raw)
-  }
-
-  const p: WorkflowParam = { nodeId, fieldName, label, type, value }
-
-  // 范围与选项
-  const min = Number(o.min ?? o.minimum ?? o.minValue)
-  const max = Number(o.max ?? o.maximum ?? o.maxValue)
-  if (Number.isFinite(min)) p.min = min
-  if (Number.isFinite(max)) p.max = max
-  const step = Number(o.step ?? o.precision)
-  if (Number.isFinite(step) && step > 0) p.step = step
-
-  const opts = o.options ?? o.optionList ?? o.enumValues ?? o.values
-  if (Array.isArray(opts)) {
-    p.options = opts.map((x: any) =>
-      typeof x === 'object' ? String(x?.label ?? x?.name ?? x?.value ?? '') : String(x)
-    ).filter(Boolean)
-  }
-
-  if (o.required === true) p.required = true
-  if (o.description && o.description !== label) p.description = String(o.description).slice(0, 100)
-
-  return p
-}
-
-/** 构造带查询参数的 URL */
-function buildUrl(base: string, path: string, key: string, id: string): string {
-  const u = new URL(base.replace(/\/+$/, '') + path)
-  u.searchParams.set(key, id)
-  return u.toString()
-}
-
 /**
- * 获取工作流详情
- * 逐个尝试端点与参数名组合，第一个成功即返回。
+ * 拉取工作流详情
+ *
+ * @param webappId 用户在 RunningHub 页面地址里复制的 ID
  */
 export async function fetchWorkflow(
-  workflowId: string,
+  webappId: string,
   apiKey: string,
   baseUrl: string,
 ): Promise<WorkflowInfo> {
-  const id = String(workflowId || '').trim()
+  const id = String(webappId || '').trim()
   if (!id) throw new AIError('请先填写工作流 ID')
+  if (!apiKey) throw new AIError('请先填写 RunningHub 的 API Key')
 
-  const errors: string[] = []
+  const url = `${baseUrl.replace(/\/+$/, '')}/api/webapp/detail`
 
-  for (const path of DETAIL_PATHS) {
-    for (const key of ID_KEYS) {
-      let url: string
-      try { url = buildUrl(baseUrl, path, key, id) } catch { continue }
-
-      try {
-        const resp = await fetch(url, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(15000),
-        })
-
-        const text = await resp.text()
-        let json: any = null
-        try { json = text ? JSON.parse(text) : null } catch { continue }
-        if (!json) continue
-
-        // 业务错误码：非 0 视为失败，继续试下一组合
-        const code = json.code
-        if (code !== undefined && code !== 0 && code !== 200) {
-          errors.push(`${path} (${key}): ${json.msg || json.message || code}`)
-          continue
-        }
-
-        const arrays = findParamArrays(json)
-        if (!arrays.length) {
-          errors.push(`${path} (${key}): 返回中未找到参数列表`)
-          continue
-        }
-
-        // 取参数最多的一组，通常就是主节点列表
-        const best = arrays.reduce((a, b) => (b.length > a.length ? b : a))
-        const params = best.map(parseParam).filter((p): p is WorkflowParam => !!p)
-
-        if (!params.length) {
-          errors.push(`${path} (${key}): 参数列表为空`)
-          continue
-        }
-
-        const name = String(
-          findDeep(json, ['webappName', 'workflowName', 'appName', 'name', 'title']) ?? '工作流'
-        )
-        const description = String(
-          findDeep(json, ['description', 'desc', 'summary']) ?? ''
-        ).slice(0, 200)
-
-        return { id, name, description, params, raw: json }
-      } catch (e) {
-        const m = (e as Error)?.message || ''
-        if (/abort|timeout/i.test(m)) errors.push(`${path} (${key}): 超时`)
-        else errors.push(`${path} (${key}): ${m}`)
-      }
+  let res: any
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey, webappId: id }),
+    })
+    const text = await resp.text()
+    try {
+      res = JSON.parse(text)
+    } catch {
+      throw new AIError(`工作流接口返回的不是 JSON（HTTP ${resp.status}）`)
     }
+    if (!resp.ok) {
+      throw new AIError(`工作流查询失败 HTTP ${resp.status}：${text.slice(0, 160)}`)
+    }
+  } catch (e) {
+    if (e instanceof AIError) throw e
+    const msg = (e as Error)?.message || String(e)
+    throw new AIError(
+      msg.includes('Failed to fetch')
+        ? `连接 RunningHub 失败。请检查网络能否访问 ${baseUrl}，以及 Key 是否有效。`
+        : `工作流查询出错：${msg}`,
+    )
   }
 
-  throw new AIError(
-    [
-      `无法获取工作流 ${id} 的参数`,
-      '已尝试的接口都不返回参数列表。常见原因：',
-      '· 工作流 ID 不正确',
-      '· 该工作流未公开或不属于当前账号',
-      '· API Key 无效或无权限',
-      '',
-      '最近一次错误：' + (errors[0] || '未知'),
-    ].join('\n')
-  )
+  if (res?.code !== 0 || !res?.data) {
+    const m = res?.msg || res?.errorMessages || '未知错误'
+    throw new AIError(`查询工作流失败：${m}。请确认工作流 ID 正确、且该应用对你可见。`)
+  }
+
+  const d = res.data
+  const params = toParams(d.inputNodes)
+
+  return {
+    webappId: String(d.id ?? id),
+    // 部分工作流没有独立的 workflowId（值为 null），
+    // 这类应用直接以 webappId 提交，不能退回用户手填的 ID，否则会跑错工作流
+    workflowId: d.workflowId ? String(d.workflowId) : '',
+    name: String(d.name ?? '未命名工作流'),
+    description: typeof d.description === 'string'
+      ? d.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : undefined,
+    coverUrl: firstCover(d),
+    params,
+    successRate: d.runningSuccessRate != null ? String(d.runningSuccessRate) : undefined,
+    avgSeconds: d.avgRunningSeconds != null ? String(d.avgRunningSeconds) : undefined,
+    tags: Array.isArray(d.tags) ? d.tags.map((t: any) => t?.name).filter(Boolean) : undefined,
+  }
 }
 
-/** 把界面上的参数值组装成提交用的 nodeInfoList */
-export function buildNodeInfoList(params: WorkflowParam[]): unknown[] {
-  return params
-    .filter((p) => p.value !== '' && p.value !== undefined && p.value !== null)
-    .map((p) => ({
-      nodeId: p.nodeId,
-      fieldName: p.fieldName,
-      fieldValue: p.value,
-    }))
+/**
+ * 组装提交用的 nodeInfoList
+ *
+ * 只提交用户改动过的参数，未改的沿用工作流默认值 ——
+ * 这样即便工作流后续加了新参数，也不会因为缺字段而失败。
+ */
+export function buildNodeInfoList(
+  params: WorkflowParam[],
+  overrides: Record<string, string | undefined>,
+  imageFilename?: string,
+): Array<{ nodeId: string; fieldName: string; fieldValue: any }> {
+  const out: Array<{ nodeId: string; fieldName: string; fieldValue: any }> = []
+  for (const p of params) {
+    const raw = overrides[p.nodeId]
+    if (raw === undefined) continue
+
+    // 图片字段传文件名，真实像素由上传接口单独处理
+    if (isImageParam(p)) {
+      const v = imageFilename || String(raw)
+      if (v) out.push({ nodeId: p.nodeId, fieldName: p.fieldName, fieldValue: v })
+      continue
+    }
+
+    const t = p.fieldType.toUpperCase()
+    let v: any = raw
+    if (t === 'FLOAT') {
+      const n = parseFloat(String(raw))
+      v = Number.isFinite(n) ? n : raw
+    } else if (t === 'INT') {
+      const n = parseInt(String(raw), 10)
+      v = Number.isFinite(n) ? n : raw
+    } else if (t === 'BOOLEAN') {
+      v = String(raw) === 'true' || String(raw) === '1'
+    }
+    out.push({ nodeId: p.nodeId, fieldName: p.fieldName, fieldValue: v })
+  }
+  return out
+}
+
+/** 参数默认值表，供界面初始化 */
+export function defaultParamValues(params: WorkflowParam[]): Record<string, string> {
+  const v: Record<string, string> = {}
+  for (const p of params) v[p.nodeId] = p.value
+  return v
 }

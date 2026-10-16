@@ -90,6 +90,52 @@ export function App() {
     })
   }, [settings, persist])
 
+  /** 选中一个已保存的工作流 */
+  const handlePickWorkflow = useCallback((webappId: string) => {
+    persist({ ...settings, activeWorkflowId: webappId, runningHubWorkflowId: webappId })
+  }, [settings, persist])
+
+  /** 保存一个工作流（名称可能暂时未知，拉到详情后会回填） */
+  const handleSaveWorkflow = useCallback((webappId: string, name?: string, coverUrl?: string) => {
+    if (settings.savedWorkflows.some((w) => w.webappId === webappId)) {
+      handlePickWorkflow(webappId)
+      return
+    }
+    const next = [
+      ...settings.savedWorkflows,
+      { webappId, name: name || '未命名工作流', coverUrl, savedAt: Date.now() },
+    ]
+    persist({ ...settings, savedWorkflows: next, activeWorkflowId: webappId, runningHubWorkflowId: webappId })
+  }, [settings, persist, handlePickWorkflow])
+
+  /** 删除一个工作流 */
+  const handleRemoveWorkflow = useCallback((webappId: string) => {
+    const next = settings.savedWorkflows.filter((w) => w.webappId !== webappId)
+    const stillActive = settings.activeWorkflowId === webappId
+    persist({
+      ...settings,
+      savedWorkflows: next,
+      activeWorkflowId: stillActive ? (next[0]?.webappId || '') : settings.activeWorkflowId,
+      runningHubWorkflowId: stillActive ? (next[0]?.webappId || '') : settings.runningHubWorkflowId,
+    })
+  }, [settings, persist])
+
+  /** 拉到详情后回填真实名称与封面，方便下次一眼认出 */
+  const handleLearnWorkflow = useCallback((webappId: string, name: string, coverUrl?: string) => {
+    const cur = settings.savedWorkflows.find((w) => w.webappId === webappId)
+    if (cur && cur.name === name && cur.coverUrl === coverUrl) return
+    if (!cur) {
+      handleSaveWorkflow(webappId, name, coverUrl)
+      return
+    }
+    persist({
+      ...settings,
+      savedWorkflows: settings.savedWorkflows.map((w) =>
+        w.webappId === webappId ? { ...w, name, coverUrl } : w
+      ),
+    })
+  }, [settings, persist, handleSaveWorkflow])
+
   /** 切换模型，同时记到当前渠道名下 */
   const handlePickModel = useCallback((model: string) => {
     persist({
@@ -181,6 +227,11 @@ export function App() {
           setShowAI(false)
           setShowSettings(true)
         }}
+        savedWorkflows={settings.savedWorkflows}
+        onPickWorkflow={handlePickWorkflow}
+        onSaveWorkflow={handleSaveWorkflow}
+        onRemoveWorkflow={handleRemoveWorkflow}
+        onLearnWorkflow={handleLearnWorkflow}
       />
 
       <SettingsDialog
