@@ -146,6 +146,9 @@ export function SettingsDialog({ open, onClose, settings, onChange }: Props) {
           channels={settings.userChannels}
           onChange={(list) => onChange({ ...settings, userChannels: list })}
           onTest={testCustomChannel}
+          onPresetKey={(channelId, apiKey) =>
+            onChange({ ...setKeyFor(settings, channelId, apiKey) })
+          }
         />
 
         {/* 贴回参数 */}

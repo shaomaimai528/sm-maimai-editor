@@ -6,6 +6,7 @@
  */
 
 import { get, set } from 'idb-keyval'
+import { CHANNEL_PRESETS, PRESET_ID_PREFIX, RUNNINGHUB_DEFAULTS } from '../core/ai/presets'
 
 export interface ChannelCredential {
   channelId: string
@@ -113,12 +114,67 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 const KEY = 'app-settings-v1'
 
+/**
+ * 首次运行时预置用户已配置好的渠道与其 Key
+ *
+ * 数据来自用户自己的 HHPS 插件配置，
+ * 目的是开箱即用 —— 不必把地址和 Key 重抄一遍。
+ * 用户随时可在设置里改或删。
+ */
+function seedPresets(s: AppSettings): AppSettings {
+  if (s.credentials.length || s.userChannels.length) return s
+
+  const userChannels: UserChannelConfig[] = []
+  const credentials: ChannelCredential[] = []
+  const lastModelByChannel: Record<string, string> = {}
+
+  for (const p of CHANNEL_PRESETS) {
+    if (!p.apiKey) continue
+    const id = PRESET_ID_PREFIX + p.key
+    userChannels.push({
+      id,
+      label: p.label,
+      apiUrl: p.apiUrl,
+      models: p.defaultModel,
+      mode: p.spec.mode,
+      submitPath: p.spec.submitPath || '/v1/images/generations',
+      pollPath: p.spec.pollPath || '',
+      imageField: p.spec.imageField || 'image',
+      promptField: p.spec.promptField || 'prompt',
+      modelField: p.spec.modelField || 'model',
+      taskIdField: p.spec.taskIdField || 'taskId',
+      imageAsDataUrl: p.spec.imageAsDataUrl !== false,
+      authHeader: p.spec.authHeader || 'Authorization',
+      authPrefix: p.spec.authPrefix ?? 'Bearer ',
+    })
+    credentials.push({ channelId: id, apiKey: p.apiKey })
+    lastModelByChannel[id] = p.defaultModel
+  }
+
+  // RunningHub 的 Key 与工作流也一并带入（来自同一份 HHPS 配置）
+  credentials.push({
+    channelId: 'runninghub-cn',
+    apiKey: RUNNINGHUB_DEFAULTS.apiKey,
+  })
+
+  return {
+    ...s,
+    userChannels,
+    credentials,
+    lastModelByChannel,
+    runningHubWorkflowId: s.runningHubWorkflowId || RUNNINGHUB_DEFAULTS.workflowId,
+    // 有可用渠道时直接切过去，省得第一次打开还得手动选
+    activeChannelId: userChannels.length ? userChannels[0].id : s.activeChannelId,
+    activeModel: userChannels.length ? lastModelByChannel[userChannels[0].id] : s.activeModel,
+  }
+}
+
 export async function loadSettings(): Promise<AppSettings> {
   try {
     const saved = await get<Partial<AppSettings>>(KEY)
-    return { ...DEFAULT_SETTINGS, ...(saved || {}) }
+    return seedPresets({ ...DEFAULT_SETTINGS, ...(saved || {}) })
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return seedPresets({ ...DEFAULT_SETTINGS })
   }
 }
 

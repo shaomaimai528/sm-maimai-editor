@@ -19,9 +19,11 @@ interface Props {
   onChange: (list: UserChannelConfig[]) => void
   /** 测试连通性：传入配置，返回提示文本 */
   onTest: (cfg: UserChannelConfig) => Promise<string>
+  /** 预置渠道自带 Key 时，通过这里一并写入凭据 */
+  onPresetKey?: (channelId: string, apiKey: string) => void
 }
 
-export function CustomChannelEditor({ channels, onChange, onTest }: Props) {
+export function CustomChannelEditor({ channels, onChange, onTest, onPresetKey }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [testMsg, setTestMsg] = useState<Record<string, string>>({})
   const [testing, setTesting] = useState<string | null>(null)
@@ -53,6 +55,8 @@ export function CustomChannelEditor({ channels, onChange, onTest }: Props) {
     cfg.authHeader = p.spec.authHeader || 'Authorization'
     cfg.authPrefix = p.spec.authPrefix ?? 'Bearer '
     onChange([...channels, cfg])
+    // 预置里带 Key 的（来自用户自己的 HHPS 配置）直接填好，省去手抄
+    if (p.apiKey) onPresetKey?.(id, p.apiKey)
   }
 
   const update = (id: string, patch: Partial<UserChannelConfig>) => {

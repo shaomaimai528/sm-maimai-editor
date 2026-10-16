@@ -28,3 +28,6 @@ Thumbs.db
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# 本机密钥，绝不入库（示例文件 local-keys.example.ts 要保留）
+src/core/ai/local-keys.ts
