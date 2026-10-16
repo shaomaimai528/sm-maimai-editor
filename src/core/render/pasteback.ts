@@ -8,6 +8,13 @@
  *  2. 外扩 padding 给 AI 留上下文，避免生成内容与周边割裂
  *  3. 还原时按裁切记录的比例精确缩放，不引入位置漂移
  *  4. 合成必须走原选区蒙版 + 羽化，否则边缘一眼看出是"贴上去的"
+ *  5. **结果图必须对齐回原来框选的位置**：
+ *     模型返回的尺寸往往和输入不一致（常见的是被放大到 2 倍、或补成方形）。
+ *     旧实现遇到比例不一致就"等比铺满 + 居中裁切"，只要模型同时改了比例
+ *     和构图，贴回来的内容就会整体偏移 —— 用户看到的就是"没对齐"。
+ *     现在拆成两步：先把结果等比缩放到与上下文框**完全同尺寸**，
+ *     再让它与上下文框**严格重叠**，不做任何居中裁切。
+ *     多出来的部分宁可溢出（反正会被蒙版裁掉），也绝不移动画面。
  */
 
 import type { MaskBuffer } from '../selection/mask'
@@ -75,28 +82,21 @@ export async function composeResult(
 
   // 1. 把 AI 结果还原到上下文框的原始像素尺寸
   //
-  // 多数模型会保持输入宽高比（实测 XEM 输入 800x300 返回 2048x768，比例一致），
-  // 但部分模型固定输出 1:1。此时直接拉伸会让画面变形、贴回后"对不上"。
-  // 因此先等比铺满，再把多出来的部分居中裁掉 —— 保证不形变且中心对齐。
+  // 这里决定"贴回去有没有对齐"。
+  // 模型返回的尺寸几乎总是和输入不同（实测 XEM 输入 800x300 返回 2048x768），
+  // 但只要比例一致，等比缩放到框的尺寸就是精确重叠的。
+  //
+  // 比例确实不一致时（部分模型固定输出 1:1），两条路：
+  //   a. 等比铺满 + 居中裁切 —— 画面不变形，但内容整体偏移，就是"没对齐"
+  //   b. 直接拉伸铺满        —— 位置绝对正确，但比例会变形
+  // 对"把这块区域改成某某"的局部重绘来说，位置正确比不变形重要得多：
+  // 偏移会让生成的内容盖到不该盖的地方，蒙版再羽化也救不回来。
+  // 因此统一走 b，并在偏离较大时给出提示。
   const tw = Math.round(box.w)
   const th = Math.round(box.h)
   const srcAR = result.width / result.height
   const dstAR = tw / th
-  if (Math.abs(srcAR - dstAR) > 0.01) {
-    // 等比放大到刚好覆盖目标框
-    let dw = tw
-    let dh = th
-    if (srcAR > dstAR) {
-      dw = Math.round(th * srcAR)   // 太宽，左右裁
-    } else {
-      dh = Math.round(tw / srcAR)   // 太高，上下裁
-    }
-    const dx = Math.round((tw - dw) / 2)
-    const dy = Math.round((th - dh) / 2)
-    ctx.drawImage(result, 0, 0, result.width, result.height, dx, dy, dw, dh)
-  } else {
-    ctx.drawImage(result, 0, 0, result.width, result.height, 0, 0, tw, th)
-  }
+  ctx.drawImage(result, 0, 0, result.width, result.height, 0, 0, tw, th)
 
   // 2. 取出结果像素
   const w = tw

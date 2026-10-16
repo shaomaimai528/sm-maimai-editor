@@ -1,13 +1,16 @@
 /**
  * 选区可视化
  *
- * 之前选区完全没有视觉反馈 —— 用户框选了却看不见，这是最影响可用性的缺陷。
- * 这里用两个手段表达选区：
- *  1. 选区外覆盖一层半透明暗色（像 PS 的快速蒙版），选区内保持原样
- *  2. 选区边界描一圈蚂蚁线（虚线，缓慢流动）
+ * 目标：让用户随时看清"选了什么"，同时**一点都不遮住图**。
  *
- * 实现方式：把灰度蒙版转成一张带 alpha 的位图，直接作为 Konva Image 叠加。
- * 比逐点绘制路径快得多，且对任意形状（套索/魔术棒/笔刷）都成立。
+ * 早先的做法是在选区外铺一层半透明黑（模仿 PS 快速蒙版），
+ * 但手机上屏幕本来就小，那层黑直接把整张图压暗，
+ * 选完就看不见图了 —— 与"图层操作挡住视线"是同一类毛病。
+ *
+ * 现在只用两种轻量手段：
+ *  1. 选区边界描一圈流动蚂蚁线（主视觉）
+ *  2. 边界内再压一圈极细的白色内描边，深色底图上也看得清
+ * 选区内部完全透明，图片原样可见。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Image as KImage } from 'react-konva'
@@ -26,11 +29,10 @@ interface Props {
 export function SelectionOverlay({
   selection, docWidth, docHeight, viewWidth, viewHeight, zoom,
 }: Props) {
-  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
   const [tick, setTick] = useState(0)
   const prevKey = useRef('')
 
-  // 只有当蒙版内容真的变化时才重建画布，避免拖动时反复绘制
+  // 只有当蒙版内容真的变化时才重建边界，避免拖动时反复绘制
   const key = useMemo(() => {
     const d = selection.data
     let sum = 0
@@ -40,37 +42,7 @@ export function SelectionOverlay({
     return `${selection.width}x${selection.height}:${sum}`
   }, [selection])
 
-  useEffect(() => {
-    if (key === prevKey.current && canvas) return
-    prevKey.current = key
-
-    const { width, height, data } = selection
-    const c = document.createElement('canvas')
-    c.width = width
-    c.height = height
-    const ctx = c.getContext('2d')!
-    const img = ctx.createImageData(width, height)
-    const px = img.data
-
-    // 选区内透明，选区外半透明黑
-    for (let i = 0, p = 0; i < data.length; i++, p += 4) {
-      const inside = data[i]
-      px[p] = 0
-      px[p + 1] = 0
-      px[p + 2] = 0
-      px[p + 3] = Math.round((1 - inside / 255) * 110)
-    }
-    ctx.putImageData(img, 0, 0)
-    setCanvas(c)
-  }, [key, selection, canvas])
-
-  // 蚂蚁线动画：让边界可见且显得"活的"
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 90)
-    return () => clearInterval(id)
-  }, [])
-
-  // 边界绘制：在单独画布上描出蒙版的轮廓
+  // 边界绘制：在单独画布上描出蒙版轮廓，只画线，不填任何东西
   const outline = useMemo(() => {
     const { width, height, data } = selection
     const c = document.createElement('canvas')
@@ -97,27 +69,41 @@ export function SelectionOverlay({
     }
     ctx.putImageData(img, 0, 0)
     return c
-  }, [key])
+  }, [key, selection])
+
+  // 蚂蚁线动画：让边界可见且显得"活的"
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 90)
+    return () => clearInterval(id)
+  }, [])
+
+  // 边界光晕粗细按缩放反向补偿，放大后不会变糊
+  const glow = Math.max(1.5, 3 / Math.max(0.25, zoom))
 
   return (
     <>
-      {canvas && (
-        <KImage
-          image={canvas}
-          width={viewWidth}
-          height={viewHeight}
-          listening={false}
-          opacity={1}
-        />
-      )}
-      {/* 蚂蚁线：用 dash offset 做流动感；tick 驱动重渲染 */}
+      {/*
+        蓝色光晕打底
+        纯白蚂蚁线在浅色/白色画面上会彻底消失（用户以为没选中），
+        先铺一层带蓝色阴影的线，浅底靠蓝、深底靠白，两种底都成立。
+      */}
       <KImage
         image={outline}
         width={viewWidth}
         height={viewHeight}
         listening={false}
-        opacity={0.85}
-        // 用交替显隐模拟流动虚线
+        opacity={0.95}
+        shadowColor="#2563EB"
+        shadowBlur={glow}
+        shadowOpacity={1}
+      />
+      {/* 白色蚂蚁线，靠交替显隐做出流动感 */}
+      <KImage
+        image={outline}
+        width={viewWidth}
+        height={viewHeight}
+        listening={false}
+        opacity={0.95}
         visible={tick % 2 === 0}
       />
     </>

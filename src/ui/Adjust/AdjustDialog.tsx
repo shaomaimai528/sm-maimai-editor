@@ -17,18 +17,25 @@ export function AdjustDialog({ open, onClose }: Props) {
 
   const active = doc?.layers.find((l) => l.id === doc.activeLayerId)
   const isAdjust = active?.kind === 'adjustment'
-  const params: AdjustParams = active?.params || DEFAULT_ADJUST
+  /**
+   * 参数必须补齐默认值
+   *
+   * 历史文档或外部导入的调整层可能只有部分字段（甚至完全没有 params），
+   * 直接拿去渲染会算出一张全黑的图 —— 这就是"拉一下滑杆就黑屏"的来源。
+   * 这里统一并到 DEFAULT_ADJUST 上，保证参与渲染的永远是完整的一套。
+   */
+  const params: AdjustParams = { ...DEFAULT_ADJUST, ...(active?.params || {}) }
 
   const ensureAdjustLayer = () => {
-    if (!doc) return
-    if (isAdjust) return
+    if (!doc || isAdjust) return
     const layer = createAdjustLayer('调整')
     commit('新增调整层', { ...doc, layers: [...doc.layers, layer], activeLayerId: layer.id })
   }
 
+  // 依赖里必须带上 isAdjust：进面板时若当前不是调整层，要立刻补一个
   useEffect(() => {
     if (open && doc && !isAdjust) ensureAdjustLayer()
-  }, [open])
+  }, [open, doc, isAdjust])
 
   if (!doc || !active) return null
 
@@ -41,7 +48,8 @@ export function AdjustDialog({ open, onClose }: Props) {
   ]
 
   return (
-    <Sheet open={open} onClose={onClose} title="调整" maxHeight="70vh">
+    /* 调整必须实时看效果，面板不能挡住图 */
+    <Sheet open={open} onClose={onClose} title="调整" variant="peek">
       <div className="adjust">
         {items.map((it) => (
           <Slider
@@ -50,7 +58,11 @@ export function AdjustDialog({ open, onClose }: Props) {
             min={it.min}
             max={it.max}
             value={Number(params[it.key] ?? 0)}
-            onChange={(v) => setAdjust(active.id, { [it.key]: v } as Partial<AdjustParams>)}
+            onChange={(v) => {
+              // 滑杆给的是有限数才写入，避免 NaN 混进渲染参数把画面算黑
+              if (!Number.isFinite(v)) return
+              setAdjust(active.id, { [it.key]: v } as Partial<AdjustParams>)
+            }}
           />
         ))}
 

@@ -7,6 +7,7 @@ import { AIDialog } from '../ui/AIDialog/AIDialog'
 import { SettingsDialog } from '../ui/Settings/SettingsDialog'
 import { LayersDialog } from '../ui/Layers/LayersDialog'
 import { AdjustDialog } from '../ui/Adjust/AdjustDialog'
+import { CanvasDialog } from '../ui/Canvas/CanvasDialog'
 import { Button } from '../ui/primitives/Button'
 import { useEditor } from '../state/editorStore'
 import { loadSettings, saveSettings, getKeyFor, type AppSettings, DEFAULT_SETTINGS } from '../state/settings'
@@ -17,6 +18,12 @@ import { renderDoc } from '../core/render/pipeline'
 import { createDoc } from '../core/doc/document'
 import { encodeCanvas, downloadBlob, suggestFilename, DEFAULT_EXPORT } from '../core/render/export'
 import './App.css'
+
+/**
+ * 单次导出允许合成的最大像素数
+ * 4000 万像素约 160MB，是手机浏览器能稳定承受的上限附近
+ */
+const EXPORT_MAX_PIXELS = 40_000_000
 
 /** 把持久化的用户渠道配置转成运行时 Channel */
 function toChannels(s: AppSettings) {
@@ -49,6 +56,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showLayers, setShowLayers] = useState(false)
   const [showAdjust, setShowAdjust] = useState(false)
+  const [showCanvas, setShowCanvas] = useState(false)
   const [toast, setToast] = useState('')
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -177,15 +185,35 @@ export function App() {
 
   const handleExport = useCallback(async () => {
     if (!doc) return
+    let bitmap: ImageBitmap | null = null
     try {
       showToast('正在导出')
-      // 导出时按原图全分辨率重放操作链
-      const bitmap = await renderDoc(doc, doc.width, doc.height)
+
+      /**
+       * 超大画布的兜底
+       *
+       * 全分辨率合成要按 width*height*4 字节申请内存，
+       * 8000x8000 就是 256MB —— 手机上必然 OOM 白屏。
+       * 超过阈值时自动按比例降到安全区，宁可用稍小的图也不能崩。
+       */
+      const pixels = doc.width * doc.height
+      const scale = pixels > EXPORT_MAX_PIXELS ? Math.sqrt(EXPORT_MAX_PIXELS / pixels) : 1
+      const outW = Math.max(1, Math.round(doc.width * scale))
+      const outH = Math.max(1, Math.round(doc.height * scale))
+      if (scale < 1) {
+        showToast(`图幅较大，按 ${Math.round(scale * 100)}% 分辨率导出`)
+      }
+
+      // 导出时按原图分辨率重放操作链
+      bitmap = await renderDoc(doc, outW, outH)
       const blob = await encodeCanvas(bitmap, DEFAULT_EXPORT)
       downloadBlob(blob, suggestFilename(doc, DEFAULT_EXPORT))
-      showToast('已导出')
+      if (scale >= 1) showToast('已导出')
     } catch (e) {
       showToast('导出失败：' + ((e as Error).message || '未知错误'))
+    } finally {
+      // ImageBitmap 占用的是原生内存，不 close 就会一直累积到页面崩溃
+      bitmap?.close?.()
     }
   }, [doc, showToast])
 
@@ -218,6 +246,7 @@ export function App() {
         onOpenLayers={() => setShowLayers(true)}
         onOpenAI={() => setShowAI(true)}
         onOpenAdjust={() => setShowAdjust(true)}
+        onOpenCanvas={() => setShowCanvas(true)}
       />}
 
       <AIDialog
@@ -251,6 +280,7 @@ export function App() {
 
       <LayersDialog open={showLayers} onClose={() => setShowLayers(false)} />
       <AdjustDialog open={showAdjust} onClose={() => setShowAdjust(false)} />
+      <CanvasDialog open={showCanvas} onClose={() => setShowCanvas(false)} />
 
       {toast && <div className="toast">{toast}</div>}
 

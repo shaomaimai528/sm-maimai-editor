@@ -2,7 +2,7 @@
  * AI 生成面板：选区 → 提示词 → 选渠道 → 生成 → 贴回
  * 这是产品的核心工作流界面
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, X, AlertCircle, CheckCircle2, Loader2, RefreshCw, Workflow, Plus } from 'lucide-react'
 import { Sheet } from '../primitives/Sheet'
 import { Button } from '../primitives/Button'
@@ -12,10 +12,14 @@ import { generate, fetchResultBitmap, fetchModels } from '../../core/ai/pipeline
 import { AIError } from '../../core/ai/types'
 import {
   contextBounds, cropForAI, composeResult, selectionBounds,
+  type ContextBox,
 } from '../../core/render/pasteback'
 import { createLayer } from '../../core/doc/document'
 import { uid } from '../../core/doc/types'
-import { fetchWorkflow, buildNodeInfoList, type WorkflowInfo, type WorkflowParam } from '../../core/ai/workflow'
+import {
+  fetchWorkflow, buildNodeInfoList, promptParamOf,
+  type WorkflowInfo, type WorkflowParam,
+} from '../../core/ai/workflow'
 import { WorkflowParams } from './WorkflowParams'
 import { WorkflowPicker } from './WorkflowPicker'
 import type { SavedWorkflow } from '../../state/settings'
@@ -82,6 +86,18 @@ export function AIDialog({
   const selection = useEditor((s) => s.selection)
   const commit = useEditor((s) => s.commit)
 
+  /**
+   * onLearnWorkflow 用 ref 间接引用
+   *
+   * 它是 App 层的 useCallback，依赖整个 settings；
+   * 回填工作流名会改 settings，于是它换新引用，
+   * 进而让下面的 loadWorkflow 换新引用、useEffect 再跑一次 ——
+   * 形成"拉取 → 回填 → 再拉取"的循环。
+   * 放进 ref 后 loadWorkflow 不再依赖它，循环断开。
+   */
+  const learnRef = useRef(onLearnWorkflow)
+  learnRef.current = onLearnWorkflow
+
   const channels = useMemo(() => allChannels(), [settings.userChannels])
   const channel = useMemo(
     () => getChannel(settings.activeChannelId) || channels[0],
@@ -92,6 +108,15 @@ export function AIDialog({
     [selection]
   )
 
+  /**
+   * 当前预览位的所有权标记
+   *
+   * 只有"还没插入图层"的合成结果才归面板管，关闭时要主动 close，
+   * 否则每生成一次就漏一张全分辨率位图，几次下来手机就撑不住。
+   * 一旦插入图层，所有权转移给图层，标记清掉，绝不能在这里 close。
+   */
+  const ownedBitmapRef = useRef<ImageBitmap | null>(null)
+
   // 关闭时清理，避免残留内存
   useEffect(() => {
     if (!open) {
@@ -100,6 +125,8 @@ export function AIDialog({
       setPhase('')
       setPreview(null)
       setResultLayer(null)
+      ownedBitmapRef.current?.close?.()
+      ownedBitmapRef.current = null
     }
   }, [open])
 
@@ -113,6 +140,8 @@ export function AIDialog({
 
     // 优先用选中的工作流，退回到设置里手填的 ID
     const wfId = (settings.activeWorkflowId || settings.runningHubWorkflowId || '').trim()
+    // 换了工作流就必须等新参数到位，期间禁止提交
+    if (wfInfo && wfInfo.webappId !== wfId) { setWfInfo(null); setWfValues({}) }
     if (!wfId) {
       setWfInfo(null); setWfValues({})
       setWfError('请先选择或添加一个工作流')
@@ -126,13 +155,21 @@ export function AIDialog({
 
     setWfLoading(true)
     setWfError('')
+    /**
+     * 立刻清空上一个工作流的参数
+     *
+     * 否则切换工作流的那一小段时间里，界面上还挂着旧工作流的参数，
+     * 用户以为改的是新工作流、提交的却是旧参数 —— 典型的"参数改了没用"。
+     * 清空后界面上是空的加载态，语义明确。
+     */
+    setWfValues({})
     try {
       const info = await fetchWorkflow(wfId, apiKey, channel.apiUrl)
       setWfInfo(info)
       // 用工作流自带默认值初始化，用户改动只覆盖对应项
       setWfValues(defaultParamValues(info.params))
       // 拿到真实名称后回填到保存列表，方便下次识别
-      onLearnWorkflow(info.webappId, info.name, info.coverUrl)
+      learnRef.current(info.webappId, info.name, info.coverUrl)
     } catch (e) {
       setWfInfo(null)
       setWfValues({})
@@ -140,7 +177,7 @@ export function AIDialog({
     } finally {
       setWfLoading(false)
     }
-  }, [open, channel, settings.activeWorkflowId, settings.runningHubWorkflowId, apiKey, onLearnWorkflow])
+  }, [open, channel, settings.activeWorkflowId, settings.runningHubWorkflowId, apiKey])
 
   useEffect(() => { loadWorkflow() }, [loadWorkflow])
 
@@ -200,29 +237,47 @@ export function AIDialog({
     setResultLayer(null)
 
     try {
-      // 1. 扩边取上下文
-      const box = contextBounds(selBounds, doc.width, doc.height)
+      // 1. 提交生成
+      //
+      // RunningHub 不需要"扩边取上下文"：局部重绘的范围由选区蒙版决定，
+      // 多送一圈周边的像素只会让模型把周边也重画一遍，反而毁掉原图。
+      // 因此这里直接把整张原图交给工作流，贴回时再按蒙版精确合成。
+      // 只有走 OpenAI 兼容协议的渠道才需要裁切 + 传 dataURL。
       setPhase('准备素材')
-      const { dataUrl } = await cropForAI(sourceBitmap, box)
+      let imageDataUrl: string | undefined
+      let box: ContextBox
+      if (isRH) {
+        box = { x: 0, y: 0, w: doc.width, h: doc.height }
+      } else {
+        box = contextBounds(selBounds, doc.width, doc.height)
+        imageDataUrl = (await cropForAI(sourceBitmap, box)).dataUrl
+      }
 
-      // 2. 提交生成
+      // 提示词落到工作流真正接受它的那个参数上
+      const rhValues = { ...wfValues }
+      if (isRH && wfInfo) {
+        const slot = promptParamOf(wfInfo.params)
+        // 参数面板里用户填过就用他填的，否则用底部输入框
+        if (slot && !(rhValues[slot.nodeId] || '').trim()) {
+          rhValues[slot.nodeId] = prompt.trim()
+        }
+      }
+
       const res = await generate({
         channel,
         apiKey,
         request: {
-          // RunningHub 走工作流，提示词由参数面板里的提示词字段决定；
-          // 自定义渠道直接吃 prompt
+          // RunningHub 的提示词由 nodeInfoList 承载，这里不重复传
           prompt: isRH ? '' : prompt.trim(),
-          imageDataUrl: dataUrl,
+          imageDataUrl,
           model: settings.activeModel || channel.defaultModel || channel.imageModels[0] || '',
           aspectRatio: settings.aspectRatio,
           resolution: settings.resolution,
           extra: {
-            // RunningHub：提交应用 ID 与逐节点参数
-            // 以工作流详情为准：有 workflowId 就传，没有就靠 appId
+            // RunningHub：提交工作流 ID 与逐节点参数
             appId: isRH ? (wfInfo?.webappId || settings.runningHubAppId) : settings.runningHubAppId,
             workflowId: isRH ? (wfInfo?.workflowId || '') : settings.runningHubWorkflowId,
-            nodeInfoList: isRH && wfInfo ? buildNodeInfoList(wfInfo.params, wfValues) : undefined,
+            nodeInfoList: isRH && wfInfo ? buildNodeInfoList(wfInfo.params, rhValues) : undefined,
             useEdits: settings.openaiUseEdits,
             custom: channel.custom,
           },
@@ -241,6 +296,11 @@ export function AIDialog({
         settings.featherRadius, settings.colorMatch
       )
 
+      // 上一张还没插入就被新结果顶掉了，先释放，避免连点生成时堆内存
+      if (ownedBitmapRef.current && ownedBitmapRef.current !== composed) {
+        ownedBitmapRef.current.close?.()
+      }
+      ownedBitmapRef.current = composed
       setPreview(composed)
       setResultLayer({ id: uid('layer'), bitmap: composed })
       setPhase('')
@@ -251,12 +311,14 @@ export function AIDialog({
     } finally {
       setBusy(false)
     }
-  }, [doc, sourceBitmap, selection, selBounds, prompt, apiKey, channel, settings, onNeedKey])
+  }, [doc, sourceBitmap, selection, selBounds, prompt, apiKey, channel, settings, onNeedKey, wfInfo, wfValues])
 
   /** 把结果作为新图层插入（不覆盖原像素） */
   const handleApply = useCallback(() => {
     if (!doc || !resultLayer) return
-    const layer = createLayer('ai-result', prompt.slice(0, 12) || 'AI 结果', resultLayer.bitmap)
+    // 名字优先用工作流名，没有提示词的 RunningHub 也能一眼认出是哪个工作流出的图
+    const title = (prompt.trim() || wfInfo?.name || 'AI 结果').slice(0, 14)
+    const layer = createLayer('ai-result', title, resultLayer.bitmap)
     layer.aiMeta = {
       channelId: channel.id,
       channelLabel: channel.label,
@@ -265,8 +327,10 @@ export function AIDialog({
       createdAt: Date.now(),
     }
     commit('AI 生成', { ...doc, layers: [...doc.layers, layer], activeLayerId: layer.id })
+    // 位图已归图层所有，交出所有权，关闭面板时不能再释放它
+    ownedBitmapRef.current = null
     onClose()
-  }, [doc, resultLayer, prompt, channel, settings, commit, onClose])
+  }, [doc, resultLayer, prompt, channel, settings, commit, onClose, wfInfo])
 
   return (
     <Sheet open={open} onClose={onClose} title="AI 生成" maxHeight="80vh">

@@ -81,13 +81,15 @@ export function makeCustomChannel(input: {
   models: string[]
   custom: Channel['custom']
 }): Channel {
+  // models 可能为空（用户还没填模型列表），直接取 [0] 会抛异常把整个界面带崩
+  const models = Array.isArray(input.models) ? input.models.filter(Boolean) : []
   return {
     id: input.id,
     label: input.label,
     family: 'custom',
-    apiUrl: input.apiUrl.replace(/\/+$/, ''),
-    imageModels: input.models,
-    defaultModel: input.models[0],
+    apiUrl: (input.apiUrl || '').replace(/\/+$/, ''),
+    imageModels: models,
+    defaultModel: models[0] || '',
     aspectRatios: ASPECT_RATIOS,
     resolutions: RESOLUTIONS,
     needsUpload: false,

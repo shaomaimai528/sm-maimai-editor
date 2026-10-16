@@ -12,9 +12,9 @@
  *   STRING  —— 多行文本（提示词通常很长）
  */
 
-import { Hash, Image as ImageIcon, MessageSquare, SlidersHorizontal, ToggleLeft } from 'lucide-react'
+import { Hash, Image as ImageIcon, MessageSquare, SlidersHorizontal, ToggleLeft, Wand2 } from 'lucide-react'
 import type { WorkflowInfo, WorkflowParam } from '../../core/ai/workflow'
-import { isImageParam } from '../../core/ai/workflow'
+import { isImageParam, promptParamOf } from '../../core/ai/workflow'
 import './WorkflowParams.css'
 
 interface Props {
@@ -47,6 +47,8 @@ export function WorkflowParams({ info, values, onChange, onReset }: Props) {
   // 图片参数由主图自动带入，不在面板里重复展示
   const editable = info.params.filter((p) => !isImageParam(p))
   const imageParams = info.params.filter(isImageParam)
+  // 哪个参数是"要改成什么"的编辑指令 —— 标出来，用户才知道提示词该填哪
+  const promptSlot = promptParamOf(info.params)
 
   return (
     <div className="wf-params">
@@ -78,11 +80,19 @@ export function WorkflowParams({ info, values, onChange, onReset }: Props) {
           const t = p.fieldType.toUpperCase()
           const v = values[p.nodeId] ?? p.value
 
+          const isPromptSlot = promptSlot?.nodeId === p.nodeId
+
           return (
-            <div className="wf-item" key={p.nodeId + p.fieldName}>
+            <div className="wf-item" key={p.nodeId + p.fieldName} data-prompt={isPromptSlot}>
               <label className="wf-label">
                 <Icon size={14} className="wf-icon" />
                 <span>{p.label || p.fieldName}</span>
+                {isPromptSlot && (
+                  <span className="wf-prompt-badge">
+                    <Wand2 size={11} />
+                    编辑指令
+                  </span>
+                )}
               </label>
 
               {t === 'BOOLEAN' ? (

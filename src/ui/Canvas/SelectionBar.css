@@ -21,6 +21,64 @@
   gap: 4px;
 }
 
+/* ---- 比例锁 ---- */
+.sel-ratio {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sel-ratio-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.sel-ratio-trigger:active { transform: scale(0.97); }
+.sel-ratio-trigger[data-on='true'] { background: rgba(255, 255, 255, 0.2); }
+
+.sel-ratio-current {
+  margin-left: auto;
+  color: #fff;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sel-ratio-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  animation: enter-rise var(--dur-fast) var(--ease-out) both;
+}
+
+.sel-ratio-item {
+  border: none;
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.sel-ratio-item:active { transform: scale(0.95); }
+.sel-ratio-item[data-on='true'] { background: var(--c-accent); color: #fff; }
+@media (hover: hover) {
+  .sel-ratio-item:hover { background: rgba(255, 255, 255, 0.2); }
+  .sel-ratio-item[data-on='true']:hover { background: var(--c-accent); }
+}
+
 .sel-btn {
   flex: 1;
   display: flex;

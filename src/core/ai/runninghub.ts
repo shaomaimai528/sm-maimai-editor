@@ -20,6 +20,17 @@ import {
 
 const UPLOAD_TIMEOUT = 180_000
 
+/**
+ * 上传得到的 token 只能待在 IMAGE 类型的字段上
+ *
+ * 血泪教训：旧实现把「字段值恰好是 example.png」也当成图片槽位，
+ * 于是把上传 token 塞进了 STRING 类型的提示词节点（它的默认值正好就是 example.png），
+ * 结果提示词被顶成文件名、而真正的 LoadImage 没拿到图 ——
+ * 工作流只能拿默认图跑，用户看到的就是「返回来的是原图」。
+ * 只认 fieldType，不再靠字段名瞎猜。
+ */
+const IMAGE_FIELD_TYPE = 'IMAGE'
+
 /** 上传图片，返回 file token */
 async function upload(blob: Blob, apiKey: string, baseUrl: string): Promise<string> {
   const endpoints = [
@@ -59,32 +70,58 @@ async function upload(blob: Blob, apiKey: string, baseUrl: string): Promise<stri
 /**
  * 提交任务
  *
- * 用户只需提供 workflowId（配合 API Key）即可调用自己的工作流。
- * 实测确认：POST /task/openapi/create 传 {apiKey, workflowId} 会返回
- * "workflow not exists"（而非参数缺失），说明该请求形状是完整可用的。
+ * 关键事实（实测 + 官方文档核实）：**图片必须通过 nodeInfoList 提交**。
+ * 把 imageDataUrl（一长串 base64）塞进 nodeParams 的 image 字段是无效的，
+ * 工作流拿不到图，只能退回默认素材跑 —— 于是"任务成功、返图却是原图"。
  *
- * 若用户填了 appId，则优先尝试 AI App 接口；否则直接走工作流接口。
+ * 两条链路：
+ *   工作流接口  POST /task/openapi/create       { apiKey, workflowId, nodeInfoList }
+ *   AI App 接口 POST /task/openapi/ai-app/run   { apiKey, webappId,   nodeInfoList }
+ *
+ * 有 workflowId 时优先走工作流接口：它对同一个应用同样有效，
+ * 且不依赖 webappId 是否处于"可用"状态。
+ * 注意不能两个都提交 —— 会跑两个任务、扣两次算力，
+ * 所以只有前一个被拒绝时才降级到下一个。
  */
 async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Promise<SubmitOutcome> {
-  const imageRef = req.fileToken || req.imageDataUrl || ''
+  const imageRef = req.fileToken || ''
   const workflowId = String(req.extra?.workflowId || '').trim()
   const appId = String(req.extra?.appId || '').trim()
+  const provided = req.extra?.nodeInfoList as unknown[] | undefined
+
+  const nodeInfoList = provided?.length
+    ? injectImage(provided, imageRef)
+    : buildNodeInfoList(req, imageRef)
+
+  /**
+   * 只有拿不到上传 token 时才会走到这里，说明上传环节已经出过问题，
+   * 此时把 base64 当兜底交上去意义不大，反而会让报错更难定位。
+   */
+  const requireImage = (): void => {
+    if (!imageRef) {
+      throw new AIError(
+        '图片没有上传成功，无法调用该工作流。\n' +
+        '请检查网络后重试；若持续失败，说明该渠道的图床上传接口不可用。',
+      )
+    }
+  }
 
   const attempts: Array<() => Promise<SubmitOutcome>> = []
 
-  // 路径 1：有 appId —— 走 AI App 接口（多数应用走这条）
-  if (appId) {
-    const provided = req.extra?.nodeInfoList as unknown[] | undefined
-    const nodeInfoList = provided?.length
-      ? injectImage(provided, imageRef)
-      : buildNodeInfoList(req, imageRef)
-
+  if (workflowId) {
     attempts.push(async () => {
-      const res = await fetchJson(`${baseUrl}/task/openapi/ai-app/run`, {
+      requireImage()
+      const res = await fetchJson(`${baseUrl}/task/openapi/create`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        // 实测：该接口要的是 webappId，传 appId 会返回 301 "webappId cannot be null"
-        body: JSON.stringify({ apiKey, webappId: appId, nodeInfoList }),
+        body: JSON.stringify({
+          apiKey,
+          workflowId,
+          nodeInfoList,
+          // 工作流本身不该弹窗，这里显式关闭，避免任务卡在等待确认
+          instanceType: 'default',
+          usePersonalQueue: 'false',
+        }),
       }, 180_000, 'RunningHub')
       const taskId = extractTaskId(res)
       if (!taskId) throw new AIError(extractMessage(res) || '任务已创建但未返回 taskId')
@@ -92,24 +129,14 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
     })
   }
 
-  // 路径 2：工作流接口 —— 只需 workflowId
-  if (workflowId) {
-    // 带上提示词与图片，字段名兼容常见工作流节点命名
-    const nodeParams: Record<string, unknown> = {
-      ...(req.extra?.nodeParams as object || {}),
-      prompt: req.prompt,
-      text: req.prompt,
-    }
-    if (imageRef) {
-      nodeParams.image = imageRef
-      nodeParams.imageUrl = imageRef
-    }
-
+  if (appId) {
     attempts.push(async () => {
-      const res = await fetchJson(`${baseUrl}/task/openapi/create`, {
+      requireImage()
+      const res = await fetchJson(`${baseUrl}/task/openapi/ai-app/run`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, workflowId, nodeParams }),
+        // 实测：该接口要的是 webappId，传 appId 会返回 301 "webappId cannot be null"
+        body: JSON.stringify({ apiKey, webappId: appId, nodeInfoList }),
       }, 180_000, 'RunningHub')
       const taskId = extractTaskId(res)
       if (!taskId) throw new AIError(extractMessage(res) || '任务已创建但未返回 taskId')
@@ -130,34 +157,36 @@ async function submit(req: SubmitRequest, apiKey: string, baseUrl: string): Prom
  * 参数列表来自工作流详情的 inputNodes（nodeId 是真实的，如 164），
  * 但那里的 fieldValue 只是示例文件名 example.png，
  * 必须替换成本次上传得到的 token，否则工作流会找不到图。
+ *
+ * 判据只有一条：fieldType === 'IMAGE'。
+ * 详见 IMAGE_FIELD_TYPE 处的说明 —— 多认一种情况就会把提示词顶掉。
  */
 function injectImage(
   list: unknown[],
   imageRef: string,
 ): Array<Record<string, unknown>> {
   return (list as Array<Record<string, unknown>>).map((item) => {
-    const type = String(item?.fieldType || '').toUpperCase()
-    const field = String(item?.fieldName || '').toLowerCase()
-    const node = String(item?.nodeName || '').toLowerCase()
-    const isImageSlot =
-      type === 'IMAGE' || field === 'image' || field === 'imageurl' || node === 'loadimage'
-    if (isImageSlot && imageRef) {
-      return { ...item, fieldValue: imageRef }
-    }
-    return item
+    const rec = item as Record<string, unknown>
+    const isImageSlot = String(rec?.fieldType || '').toUpperCase() === IMAGE_FIELD_TYPE
+    if (isImageSlot && imageRef) return { ...rec, fieldValue: imageRef }
+    return rec
   })
 }
 
-/** 组装默认的节点参数列表（当界面未提供时使用） */
+/**
+ * 组装默认的节点参数列表（当界面未提供时使用）
+ *
+ * 只在完全没有工作流详情时才走到这里，nodeId 是通用兜底值。
+ * 注意提示词的 nodeId 必须是真实节点，早期写的 'prompt' 不是数字节点号，
+ * 服务端会直接忽略 —— 与其塞一个假节点制造"提交成功了但没生效"的错觉，
+ * 不如只交图片，让提示词的缺失在界面上显式暴露出来。
+ */
 function buildNodeInfoList(req: SubmitRequest, imageRef: string): unknown[] {
   const list: Array<Record<string, unknown>> = []
-  // 这两个 nodeId 是兜底值，仅在工作流详情拿不到时使用
-  if (req.prompt) {
-    list.push({ nodeId: 'prompt', fieldName: 'text', fieldValue: req.prompt })
-  }
   if (imageRef) {
     list.push({ nodeId: '164', nodeName: 'LoadImage', fieldName: 'image', fieldValue: imageRef, fieldType: 'IMAGE' })
   }
+  void req
   return list
 }
 

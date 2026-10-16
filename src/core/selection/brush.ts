@@ -16,7 +16,7 @@ function applyOpacityCap(
   const op = Math.max(0, Math.min(1, s.opacity))
   if (!base || op >= 0.999) return current
   const out = new Uint8ClampedArray(current.data.length)
-  const src = s.erase ? base.data : base.data
+  const src = base.data
   for (let i = 0; i < out.length; i++) {
     if (s.erase) {
       // 擦除：以底的浓度为准，最多擦掉 opacity 的比例

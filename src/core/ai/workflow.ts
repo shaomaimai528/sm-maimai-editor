@@ -151,8 +151,12 @@ export async function fetchWorkflow(
 /**
  * 组装提交用的 nodeInfoList
  *
- * 只提交用户改动过的参数，未改的沿用工作流默认值 ——
- * 这样即便工作流后续加了新参数，也不会因为缺字段而失败。
+ * 三条规则：
+ *  1. 全部参数都要提交 —— 不能只交"用户改动过的"。
+ *     用户看不出哪些值被自己动过，界面显示的就是他期望生效的全套值；
+ *     漏交则工作流用它自己的默认跑，界面与结果对不上。
+ *  2. 图片字段只传上传得到的 token，绝不传 base64。
+ *  3. 数值按类型真正转成 number / boolean，字符串化的数字节点可能不认。
  */
 export function buildNodeInfoList(
   params: WorkflowParam[],
@@ -161,16 +165,17 @@ export function buildNodeInfoList(
 ): Array<{ nodeId: string; fieldName: string; fieldValue: any }> {
   const out: Array<{ nodeId: string; fieldName: string; fieldValue: any }> = []
   for (const p of params) {
-    const raw = overrides[p.nodeId]
-    if (raw === undefined) continue
+    // 界面上没有这一项时退回工作流默认值
+    const raw = overrides[p.nodeId] ?? p.value
 
-    // 图片字段传文件名，真实像素由上传接口单独处理
+    // 图片字段传上传返回的文件标识，真实像素由上传接口单独处理
     if (isImageParam(p)) {
-      const v = imageFilename || String(raw)
+      const v = imageFilename || String(raw ?? '')
       if (v) out.push({ nodeId: p.nodeId, fieldName: p.fieldName, fieldValue: v })
       continue
     }
 
+    if (raw === undefined) continue
     const t = p.fieldType.toUpperCase()
     let v: any = raw
     if (t === 'FLOAT') {
@@ -185,6 +190,34 @@ export function buildNodeInfoList(
     out.push({ nodeId: p.nodeId, fieldName: p.fieldName, fieldValue: v })
   }
   return out
+}
+
+/**
+ * 工作流里哪一项是"要改什么"的说明
+ *
+ * 这类后端的 Klein / Qwen 编辑流普遍如此：一个 PrimitiveStringMultiline 节点
+ * 承载用户指令，字段名是 value 而不是 prompt —— 所以不能靠字段名去猜。
+ * 判据同样是类型：STRING（含多行）就是编辑指令。
+ *
+ * 匹配优先级：中文说明像提示词 → 字段名像提示词 → 排第一个的多行文本
+ */
+const PROMPT_LABEL_HINT = /提示词|prompt|指令|描述|编辑/i
+
+export function promptParamOf(params: WorkflowParam[]): WorkflowParam | null {
+  const textParams = params.filter(
+    (p) => p.fieldType.toUpperCase() === 'STRING' && !isImageParam(p),
+  )
+  if (!textParams.length) return null
+
+  const excluded = /^(value|参考|reference)$/i
+  const byLabel = textParams.find((p) => PROMPT_LABEL_HINT.test(p.label) && !excluded.test(p.label))
+  if (byLabel) return byLabel
+
+  const byName = textParams.find((p) => /prompt|text|instruction/i.test(p.fieldName))
+  if (byName) return byName
+
+  // 没有线索时取第一个非"版权声明"之类的文本参数
+  return textParams.find((p) => !excluded.test(p.label)) || textParams[0]
 }
 
 /** 参数默认值表，供界面初始化 */

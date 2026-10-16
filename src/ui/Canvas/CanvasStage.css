@@ -30,6 +30,28 @@
   .brush-cursor { animation: none; transition: none; }
 }
 
+/* 框选时的实时尺寸标记：贴着框上沿，不遮挡选区内部 */
+.rect-size-badge {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: rgba(10, 10, 10, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 8px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 46;
+  animation: enter-scale var(--dur-fast) var(--ease-out) both;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rect-size-badge { animation: none; }
+}
+
 .original-badge {
   position: absolute;
   top: calc(var(--safe-t) + 16px);

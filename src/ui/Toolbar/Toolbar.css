@@ -14,7 +14,18 @@
 }
 .topbar > * { pointer-events: auto; }
 
-.topbar-left, .topbar-right { display: flex; align-items: center; gap: 6px; }
+/* 右侧按钮变多之后窄屏会溢出，允许横向滚动而不是把最后一个按钮挤掉 */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.topbar-right::-webkit-scrollbar { display: none; }
+
+.topbar-left { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 /* 顶部按钮在深色画布上需要反色 */
 .topbar .btn[data-variant='ghost'] {

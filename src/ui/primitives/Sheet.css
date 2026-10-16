@@ -32,6 +32,45 @@
 .sheet-root[data-state='entered'] .sheet-panel { transform: translateY(0); }
 .sheet-root[data-state='exiting'] .sheet-panel { transform: translateY(100%); }
 
+/* ============================================================
+   非遮挡变体（peek）
+   图层与调整面板必须"一边看图一边调"，所以：
+     - 不铺遮罩，画布完全可见
+     - 不做整体位移动画，改成高度展开，面板始终贴底
+     - 顶部只压一条极淡的描边，让人看清这是浮层而不是画布的一部分
+   ============================================================ */
+.sheet-root[data-variant='peek'] {
+  /* 只覆盖底部面板那一条，上方的事件全部穿透到画布 */
+  pointer-events: none;
+}
+
+.sheet-root[data-variant='peek'] .sheet-panel {
+  pointer-events: auto;
+  transform: none;
+  max-height: min(46vh, 420px);
+  border-top: 1px solid var(--c-ink-12);
+  box-shadow: 0 -6px 24px rgba(10, 10, 10, 0.1);
+  /* 用裁切做"展开/收起"，避免位移把面板推到屏幕中间 */
+  transition: clip-path var(--dur-slow) var(--ease-out);
+}
+
+.sheet-root[data-variant='peek'][data-state='entering'] .sheet-panel,
+.sheet-root[data-variant='peek'][data-state='entering'] .sheet-body {
+  overflow: hidden;
+}
+
+/* 收起时把内容裁掉，展开时完整露出 —— 这是 peek 的进出场动画 */
+.sheet-root[data-variant='peek'][data-state='entered'] .sheet-panel {
+  clip-path: inset(0 0 0 0 round var(--r-lg) var(--r-lg) 0 0);
+}
+.sheet-root[data-variant='peek'][data-state='exiting'] .sheet-panel {
+  clip-path: inset(100% 0 0 0 round var(--r-lg) var(--r-lg) 0 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-root[data-variant='peek'] .sheet-panel { transition: none; }
+}
+
 .sheet-grip {
   width: 36px;
   height: 4px;

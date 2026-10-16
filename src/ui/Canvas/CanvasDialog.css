@@ -1,0 +1,140 @@
+/* 画布对话框 */
+
+.cv-dialog { display: flex; flex-direction: column; gap: 14px; }
+
+.cv-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--c-accent);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 尺寸预设 ---- */
+.cv-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.cv-preset {
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-full);
+  background: var(--c-bg);
+  color: var(--c-ink-70);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cv-preset:active { transform: scale(0.95); }
+.cv-preset[data-on='true'] {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: #fff;
+}
+@media (hover: hover) {
+  .cv-preset:hover { border-color: var(--c-accent); color: var(--c-accent); }
+  .cv-preset[data-on='true']:hover { color: #fff; }
+}
+
+/* ---- 宽高输入 ---- */
+.cv-fields { display: flex; align-items: flex-end; gap: 8px; }
+
+.cv-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cv-field > span { font-size: 12px; color: var(--c-ink-60); }
+.cv-field input {
+  width: 100%;
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-sm);
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: inherit;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  padding: 9px 12px;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.cv-field input:focus { outline: none; border-color: var(--c-accent); }
+
+.cv-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-sm);
+  background: var(--c-bg);
+  color: var(--c-ink-40);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cv-link[data-on='true'] { border-color: var(--c-accent); color: var(--c-accent); }
+.cv-link:active { transform: scale(0.94); }
+
+/* ---- 底图模式 ---- */
+.cv-fit { display: flex; align-items: center; gap: 10px; }
+.cv-fit-label { font-size: 12px; color: var(--c-ink-60); flex-shrink: 0; }
+.cv-fit-opts { display: flex; gap: 6px; flex: 1; }
+
+.cv-fit-opt {
+  flex: 1;
+  border: 1px solid var(--c-ink-12);
+  border-radius: var(--r-sm);
+  background: var(--c-bg);
+  color: var(--c-ink-70);
+  font-size: 12.5px;
+  padding: 8px 4px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cv-fit-opt:active { transform: scale(0.96); }
+.cv-fit-opt[data-on='true'] {
+  border-color: var(--c-accent);
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--c-accent);
+}
+
+/* ---- 结果说明 ---- */
+.cv-plan {
+  font-size: 12px;
+  color: var(--c-ink-50);
+  font-variant-numeric: tabular-nums;
+  animation: enter-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.cv-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--c-danger);
+  font-size: 13px;
+  animation: enter-rise var(--dur-fast) var(--ease-out) both;
+}
+
+.cv-actions { display: flex; gap: 10px; padding-top: 4px; }
+.cv-actions .btn { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-plan, .cv-error { animation: none; }
+}

@@ -114,9 +114,19 @@ export function makeDefaultUserChannel(id: string): UserChannelConfig {
   }
 }
 
+/**
+ * 内置 RunningHub 渠道的 id
+ *
+ * 必须与 core/ai/channels.ts 里的定义完全一致。
+ * 之前这里写的是 runninghub-cn，而实际注册的是 rh-cn ——
+ * 两个字符串对不上，导致默认渠道指向一个不存在的条目：
+ * 首屏渠道下拉是空的，Key 也挂在一个永远不会被读取的 id 下。
+ */
+const RUNNINGHUB_CHANNEL_ID = 'rh-cn'
+
 export const DEFAULT_SETTINGS: AppSettings = {
   credentials: [],
-  activeChannelId: 'runninghub-cn',
+  activeChannelId: RUNNINGHUB_CHANNEL_ID,
   activeModel: '',
   aspectRatio: 'auto',
   resolution: '1K',
@@ -142,6 +152,33 @@ export const DEFAULT_SETTINGS: AppSettings = {
 const KEY = 'app-settings-v1'
 
 /**
+ * 用户主动删掉的 Key
+ *
+ * seedPresets 每次加载都会补预置 Key，否则"删除 Key"这个操作根本无效 ——
+ * 用户删完刷新一下又回来了。这里把删过的渠道记下来，补的时候跳过。
+ * 用的是"记录删除"而不是"记录用户改过"，因为用户也可能只是想换个 Key。
+ */
+const REMOVED_KEYS_KEY = 'removed-key-channels'
+
+function loadRemovedKeyIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(REMOVED_KEYS_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(arr) ? arr.map(String) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveRemovedKeyIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(REMOVED_KEYS_KEY, JSON.stringify([...ids]))
+  } catch {
+    // 存不进去也不影响本次会话的删除效果
+  }
+}
+
+/**
  * 首次运行时预置用户已配置好的渠道与其 Key
  *
  * 数据来自用户自己的 HHPS 插件配置，
@@ -158,6 +195,9 @@ function seedPresets(s: AppSettings): AppSettings {
   const credentials: ChannelCredential[] = [...(s.credentials || [])]
   const lastModelByChannel: Record<string, string> = { ...(s.lastModelByChannel || {}) }
 
+  // 用户删过的 Key 不再补回来，否则"删除"形同虚设
+  const removedKeys = loadRemovedKeyIds()
+
   // 已导入过密钥的渠道 id，用来给没有内置 Key 的环境补上
   const importedKeys = new Map(credentials.filter((c) => c.apiKey).map((c) => [c.channelId, c.apiKey]))
 
@@ -165,10 +205,10 @@ function seedPresets(s: AppSettings): AppSettings {
     const id = PRESET_ID_PREFIX + p.key
     // 渠道条目本身始终要建出来，哪怕没有内置 Key。
     // 否则公开部署的版本里这些渠道根本不存在，用户导出配置再导入也补不回来。
-    const seededKey = p.apiKey || importedKeys.get(id) || ''
+    const seededKey = removedKeys.has(id) ? '' : (p.apiKey || importedKeys.get(id) || '')
     if (have.has(id)) {
-      // 渠道已存在，只补 Key（用户可能清空过）
-      if (!haveKey.has(id) && p.apiKey) credentials.push({ channelId: id, apiKey: p.apiKey })
+      // 渠道已存在，只补 Key（且必须是用户没有主动删过的）
+      if (!haveKey.has(id) && seededKey) credentials.push({ channelId: id, apiKey: seededKey })
       continue
     }
     userChannels.push({
@@ -192,8 +232,8 @@ function seedPresets(s: AppSettings): AppSettings {
   }
 
   // RunningHub 的 Key 与工作流也一并带入（来自同一份 HHPS 配置）
-  if (RUNNINGHUB_DEFAULTS.apiKey && !haveKey.has('runninghub-cn')) {
-    credentials.push({ channelId: 'runninghub-cn', apiKey: RUNNINGHUB_DEFAULTS.apiKey })
+  if (RUNNINGHUB_DEFAULTS.apiKey && !haveKey.has(RUNNINGHUB_CHANNEL_ID)) {
+    credentials.push({ channelId: RUNNINGHUB_CHANNEL_ID, apiKey: RUNNINGHUB_DEFAULTS.apiKey })
   }
   // 工作流列表：合并用户已有的与预置的，按 webappId 去重
   const seen = new Set((s.savedWorkflows || []).map((w) => w.webappId))
@@ -204,16 +244,29 @@ function seedPresets(s: AppSettings): AppSettings {
       .map((w) => ({ webappId: w.webappId, name: w.name, savedAt: Date.now() })),
   ]
 
+  /**
+   * 迁移历史数据里的错误渠道 id
+   *
+   * 老版本把这个 id 写进了本地存储，直接改常量救不了已经装过 App 的用户 ——
+   * 他们打开后仍然是空白下拉框。这里在读入时顺手纠正。
+   */
+  const LEGACY_CHANNEL_IDS: Record<string, string> = { 'runninghub-cn': RUNNINGHUB_CHANNEL_ID }
+  const fixId = (id: string) => LEGACY_CHANNEL_IDS[id] || id
+
+  const migratedCredentials = credentials.map((c) => {
+    const next = fixId(c.channelId)
+    return next === c.channelId ? c : { ...c, channelId: next }
+  })
+
   return {
     ...s,
     userChannels,
-    credentials,
+    credentials: migratedCredentials,
+    activeChannelId: fixId(s.activeChannelId || userChannels[0]?.id || DEFAULT_SETTINGS.activeChannelId),
     lastModelByChannel,
     savedWorkflows,
     activeWorkflowId: s.activeWorkflowId || savedWorkflows[0]?.webappId || '',
     runningHubWorkflowId: s.runningHubWorkflowId || RUNNINGHUB_DEFAULTS.workflowId,
-    // 只在用户还没选过渠道时才替他选第一个，避免覆盖已有偏好
-    activeChannelId: s.activeChannelId || userChannels[0]?.id || DEFAULT_SETTINGS.activeChannelId,
     activeModel: s.activeModel || (userChannels.length ? lastModelByChannel[userChannels[0].id] : ''),
   }
 }
@@ -242,6 +295,13 @@ export function getKeyFor(s: AppSettings, channelId: string): string {
 export function setKeyFor(s: AppSettings, channelId: string, apiKey: string): AppSettings {
   const rest = s.credentials.filter((c) => c.channelId !== channelId)
   const credentials = apiKey ? [...rest, { channelId, apiKey }] : rest
+
+  // 记下"用户删过这个 Key"，否则下次加载 seedPresets 又会把它补回来
+  const removed = loadRemovedKeyIds()
+  if (apiKey) removed.delete(channelId)
+  else removed.add(channelId)
+  saveRemovedKeyIds(removed)
+
   return { ...s, credentials }
 }
 

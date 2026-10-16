@@ -17,6 +17,14 @@ export interface ProxyInfo {
   height: number
 }
 
+/** 合成结果异常时抛出，由调用方决定是重试还是提示用户 */
+export class RenderError extends Error {
+  constructor(message: string, public readonly layerId?: string) {
+    super(message)
+    this.name = 'RenderError'
+  }
+}
+
 /** 生成代理图：小到足以实时预览，大到肉眼无差 */
 export async function makeProxy(source: ImageBitmap, maxEdge = PROXY_MAX_EDGE): Promise<ProxyInfo> {
   const scale = Math.min(1, maxEdge / Math.max(source.width, source.height))
@@ -43,12 +51,14 @@ export async function renderDoc(
   height: number,
   opts: { skipHidden?: boolean } = {}
 ): Promise<ImageBitmap> {
-  const canvas = new OffscreenCanvas(width, height)
+  const w = Math.max(1, Math.round(width))
+  const h = Math.max(1, Math.round(height))
+  const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d')!
 
   for (const layer of doc.layers) {
     if (opts.skipHidden !== false && !layer.visible) continue
-    await renderLayer(ctx, layer, width, height)
+    await renderLayer(ctx, layer, w, h)
   }
 
   return createImageBitmap(canvas)
@@ -61,15 +71,24 @@ async function renderLayer(
   height: number
 ) {
   // 调整层：对当前已合成内容做整体调整
-  if (layer.kind === 'adjustment' && layer.params) {
-    // 大图一次性 getImageData 会占用 width*height*4 字节，
-    // 4000x3000 就是 48MB，iOS 上容易直接崩。改为分块处理。
+  if (layer.kind === 'adjustment') {
+    // params 缺失就当作"没有任何调整"，直接跳过 ——
+    // 旧实现会拿 undefined 去算 LUT，整幅图变成 0，表现就是"一拉滑杆就黑屏"
+    if (!layer.params) return
     const CHUNK = 512
-    for (let y0 = 0; y0 < height; y0 += CHUNK) {
-      const h = Math.min(CHUNK, height - y0)
-      const img = ctx.getImageData(0, y0, width, h)
-      applyAdjust(img, layer.params)
-      ctx.putImageData(img, 0, y0)
+    try {
+      for (let y0 = 0; y0 < height; y0 += CHUNK) {
+        const h = Math.min(CHUNK, height - y0)
+        const img = ctx.getImageData(0, y0, width, h)
+        applyAdjust(img, layer.params)
+        ctx.putImageData(img, 0, y0)
+      }
+    } catch (e) {
+      // 处理失败就跳过这一层，保留已经画好的底层像素。
+      // 宁可这一层不生效，也不能让整张画布变黑 ——
+      // 用户看到黑屏时完全无从判断是哪一步出的问题。调用方会把失败如实提示出来。
+      console.warn('[render] 调整层处理失败，已跳过', layer.id, e)
+      throw new RenderError('调整层处理失败', layer.id)
     }
     return
   }
@@ -82,7 +101,7 @@ async function renderLayer(
   const tctx = tmp.getContext('2d')!
   tctx.imageSmoothingEnabled = true
   tctx.imageSmoothingQuality = 'high'
-  tctx.drawImage(bmp, 0, 0, width, height)
+  tctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, width, height)
 
   if (layer.mask?.data) {
     // 同样分块，控制单次内存占用
@@ -106,9 +125,35 @@ async function renderLayer(
     }
   }
 
-  ctx.globalAlpha = layer.opacity
-  ctx.globalCompositeOperation = layer.blendMode
-  ctx.drawImage(tmp, 0, 0)
-  ctx.globalAlpha = 1
-  ctx.globalCompositeOperation = 'source-over'
+  // 合成参数必须逐层重置：任何一次异常都不能把状态泄漏给后面的图层
+  const prevAlpha = ctx.globalAlpha
+  const prevOp = ctx.globalCompositeOperation
+  try {
+    ctx.globalAlpha = clamp01(layer.opacity)
+    ctx.globalCompositeOperation = safeBlend(layer.blendMode)
+    ctx.drawImage(tmp, 0, 0)
+  } finally {
+    ctx.globalAlpha = prevAlpha
+    ctx.globalCompositeOperation = prevOp
+  }
+}
+
+function clamp01(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 1
+}
+
+/**
+ * 混合模式白名单
+ * 浏览器对不认识的值会保留上一次设置 —— 那会让后面所有图层
+ * 都跟着用错模式，画面整体崩掉。这里只放行确定支持的那几个。
+ */
+const SAFE_BLEND: ReadonlySet<string> = new Set([
+  'source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten',
+  'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion',
+])
+
+function safeBlend(mode: unknown): GlobalCompositeOperation {
+  const m = typeof mode === 'string' ? mode : ''
+  return (SAFE_BLEND.has(m) ? m : 'source-over') as GlobalCompositeOperation
 }

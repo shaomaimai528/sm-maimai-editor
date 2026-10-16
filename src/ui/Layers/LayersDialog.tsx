@@ -47,6 +47,7 @@ export function LayersDialog({ open, onClose }: Props) {
   const setLayerMask = useEditor((s) => s.setLayerMask)
   const setBrushTarget = useEditor((s) => s.setBrushTarget)
   const setTool = useEditor((s) => s.setTool)
+  const selectLayer = useEditor((s) => s.selectLayer)
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
@@ -72,14 +73,15 @@ export function LayersDialog({ open, onClose }: Props) {
     if (!layer.mask?.data) {
       setLayerMask(layer.id, createMask(doc.width, doc.height, 255))
     }
-    commit('选择图层', { ...doc, activeLayerId: layer.id })
+    selectLayer(layer.id)
     setBrushTarget('layer-mask')
     setTool('brush')
     onClose()
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="图层" maxHeight="78vh">
+    /* 用 peek 变体：面板只占底部一条，画布始终看得见 —— 图层操作要盯着图做 */
+    <Sheet open={open} onClose={onClose} title="图层" variant="peek">
       <div className="layers">
         {/* 当前图层的快速设置 */}
         {active && (
@@ -152,7 +154,7 @@ export function LayersDialog({ open, onClose }: Props) {
 
                 <button
                   className="layer-pick"
-                  onClick={() => commit('选择图层', { ...doc, activeLayerId: layer.id })}
+                  onClick={() => selectLayer(layer.id)}
                   onDoubleClick={() => startRename(layer)}
                 >
                   <LayerThumb layer={layer} fallback={composed?.bitmap} size={38} />

@@ -36,6 +36,8 @@ export function CanvasStage() {
   const brushTarget = useEditor((s) => s.brushTarget)
   const paintLayerMask = useEditor((s) => s.paintLayerMask)
   const activeLayerId = useEditor((s) => s.doc?.activeLayerId)
+  const setLiveRect = useEditor((s) => s.setLiveRect)
+  const liveRect = useEditor((s) => s.liveRect)
 
   // 笔刷要实时读到最新参数，用 ref 避免闭包捕获旧值
   const brushRef = useRef({ settings: brushSettings, target: brushTarget, layerId: activeLayerId })
@@ -55,6 +57,12 @@ export function CanvasStage() {
   const [brushCursor, setBrushCursor] = useState<{ x: number; y: number } | null>(null)
   const isDrawing = useRef(false)
 
+  // 框选比例锁：用户改了就同步给工具，下一次落笔即生效
+  const aspectLock = useEditor((s) => s.aspectLock)
+  useEffect(() => {
+    rect.setAspectLock(aspectLock)
+  }, [aspectLock])
+
   // 按渲染管线合成真实画面（含调整层、图层蒙版、AI 图层）
   const composed = useComposedBitmap(doc)
 
@@ -67,15 +75,33 @@ export function CanvasStage() {
 
   const view = useEditor((s) => ({ zoom: s.zoom, panX: s.panX, panY: s.panY }))
 
-  // 画布在屏幕上的基准尺寸（适配容器）
+  /**
+   * 可视区域
+   *
+   * 非遮挡面板（图层/调整）停靠底部时，把它的高度从可视区里扣掉，
+   * 图片就在剩下的空间里居中 —— 否则面板会直接盖住图片下半截，
+   * 用户"看不到图"，实际是排版挤掉的，不是渲染问题。
+   */
+  const chrome = useEditor((s) => s.chrome)
+
+  // 画布在屏幕上的基准尺寸（适配可视区）
   const base = useMemo(() => {
     if (!doc) return { w: 0, h: 0, scale: 1 }
     const padding = 24
     const availW = size.w - padding * 2
-    const availH = size.h - 200
+    const availH = Math.max(120, size.h - 200 - chrome.bottomInset)
     const s = Math.min(availW / doc.width, availH / doc.height, 1)
     return { w: doc.width * s, h: doc.height * s, scale: s }
-  }, [doc, size])
+  }, [doc, size, chrome.bottomInset])
+
+  /**
+   * 画布内容的视觉中心（Stage 坐标）
+   * 底部有非遮挡面板时，中心整体上移半个面板高度
+   */
+  const center = useMemo(() => ({
+    x: size.w / 2,
+    y: (size.h - chrome.bottomInset) / 2,
+  }), [size, chrome.bottomInset])
 
   /**
    * Stage 本地坐标 → 文档像素坐标
@@ -85,13 +111,13 @@ export function CanvasStage() {
   const toDoc = useCallback((stageX: number, stageY: number) => {
     if (!doc) return { x: 0, y: 0 }
     const total = base.scale * view.zoom
-    const tx = size.w / 2 + view.panX - (base.w * view.zoom) / 2
-    const ty = size.h / 2 + view.panY - (base.h * view.zoom) / 2
+    const tx = center.x + view.panX - (base.w * view.zoom) / 2
+    const ty = center.y + view.panY - (base.h * view.zoom) / 2
     return {
       x: (stageX - tx) / total,
       y: (stageY - ty) / total,
     }
-  }, [doc, base, view, size])
+  }, [doc, base, view, center])
 
   // 手势回调用 ref 读取最新值，避免闭包捕获旧的 view
   const viewRef = useRef(view)
@@ -193,7 +219,10 @@ export function CanvasStage() {
 
     if (tool === 'rect' && !rect.isEmpty()) {
       rect.move(p.x, p.y)
-      setRectPreview(rect.getRect())
+      const r = rect.getRect()
+      setRectPreview(r)
+      // 实时尺寸要报给浮动标记，拖动时就能看到选了多少像素
+      setLiveRect(r)
     } else if (tool === 'lasso' && !lasso.isEmpty()) {
       lasso.move(p.x, p.y)
       const pts = lasso.getPoints()
@@ -211,6 +240,7 @@ export function CanvasStage() {
 
   const handlePointerUp = useCallback(() => {
     isDrawing.current = false
+    setLiveRect(null)
     if (tool === 'rect' && doc) {
       const m = rect.finish(doc.width, doc.height)
       if (m) pushSelectionHistory('矩形选框', m)
@@ -232,14 +262,14 @@ export function CanvasStage() {
       }
     }
     brush.end()
-  }, [tool, doc, selection, setSelection, pushSelectionHistory, paintLayerMask])
+  }, [tool, doc, selection, setSelection, pushSelectionHistory, paintLayerMask, setLiveRect])
 
   const stageW = size.w
   const stageH = size.h
 
   const transform = {
-    x: stageW / 2 + view.panX - (base.w * view.zoom) / 2,
-    y: stageH / 2 + view.panY - (base.h * view.zoom) / 2,
+    x: center.x + view.panX - (base.w * view.zoom) / 2,
+    y: center.y + view.panY - (base.h * view.zoom) / 2,
     scale: view.zoom,
   }
 
@@ -263,7 +293,7 @@ export function CanvasStage() {
             <KImage image={sourceBitmap} width={base.w} height={base.h} />
           )}
 
-          {/* 选区可视化：蚂蚁线 + 半透明遮罩 */}
+          {/* 选区可视化：蚂蚁线 + 只在选区外缘轻压一层，绝不整幅盖暗 */}
           {selection && !showOriginal && (
             <SelectionOverlay
               selection={selection}
@@ -316,6 +346,22 @@ export function CanvasStage() {
             height: brushSettings.radius * 2 * base.scale * view.zoom,
           }}
         />
+      )}
+
+      {/*
+        框选实时尺寸：跟着指尖走，拖动过程中就能看到选了多少像素。
+        放在屏幕上而不是 Konva 层里 —— 它不该跟着缩放一起放大缩小。
+      */}
+      {liveRect && doc && (
+        <div
+          className="rect-size-badge"
+          style={{
+            left: transform.x + (liveRect.x + liveRect.w / 2) * base.scale * view.zoom,
+            top: transform.y + liveRect.y * base.scale * view.zoom - 12,
+          }}
+        >
+          {Math.round(liveRect.w)} × {Math.round(liveRect.h)} px
+        </div>
       )}
 
       {showOriginal && <div className="original-badge">原图</div>}
