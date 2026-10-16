@@ -2,11 +2,16 @@
 
 import { create } from 'zustand'
 import type { Doc, Layer, AdjustParams } from '../core/doc/types'
+import { uid } from '../core/doc/types'
 import { History } from '../core/doc/history'
 import type { MaskBuffer } from '../core/selection/mask'
 import { activeLayer as findActive, insertLayerAbove, removeLayer as removeLayerOp, updateLayer as updateLayerOp, moveLayer as moveLayerOp } from '../core/doc/document'
+import { DEFAULT_BRUSH, type BrushSettings } from '../core/selection/brush'
 
 export type ToolId = 'move' | 'rect' | 'lasso' | 'wand' | 'brush' | 'erase' | 'adjust'
+
+/** 笔刷当前作用对象：选区，还是某个图层的蒙版 */
+export type BrushTarget = 'selection' | 'layer-mask'
 
 interface EditorState {
   doc: Doc | null
@@ -23,6 +28,11 @@ interface EditorState {
 
   /** 预览用的原图对照 */
   showOriginal: boolean
+
+  /** 笔刷参数（大小/硬度/流量/不透明度），与 PS 的手感对齐 */
+  brush: BrushSettings
+  /** 笔刷涂抹到哪里 */
+  brushTarget: BrushTarget
 
   // ---- actions ----
   setDoc: (doc: Doc | null, source?: ImageBitmap | null) => void
@@ -45,6 +55,21 @@ interface EditorState {
   undo: () => void
   redo: () => void
 
+  setBrush: (patch: Partial<BrushSettings>) => void
+  setBrushTarget: (t: BrushTarget) => void
+  /**
+   * 给图层蒙版涂抹
+   * 蒙版不存在时按需创建：进入「图层蒙版」模式即视为全白（全显示），
+   * 与 PS 里「添加蒙版后默认全显」一致，用户涂黑才是遮住。
+   */
+  paintLayerMask: (layerId: string, next: MaskBuffer | null) => void
+  /** 给指定图层挂上/取下蒙版 */
+  setLayerMask: (layerId: string, mask: MaskBuffer | undefined) => void
+  setLayerOpacity: (layerId: string, opacity: number) => void
+  setLayerBlend: (layerId: string, blendMode: Layer['blendMode']) => void
+  renameLayer: (layerId: string, name: string) => void
+  duplicateLayer: (layerId: string) => void
+
   setView: (v: { zoom?: number; panX?: number; panY?: number }) => void
   /** 围绕画布上某点缩放，并同步补偿位移 —— 必须原子提交，否则缩放会跑偏 */
   zoomAt: (factor: number, cx: number, cy: number, viewW: number, viewH: number) => void
@@ -61,6 +86,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   panX: 0,
   panY: 0,
   showOriginal: false,
+  brush: { ...DEFAULT_BRUSH },
+  brushTarget: 'selection',
 
   setDoc: (doc, source = null) => {
     // 换文档时清空代理图与选区，历史重新开始
@@ -184,6 +211,61 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   }),
   setShowOriginal: (showOriginal) => set({ showOriginal }),
+
+  setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
+  setBrushTarget: (brushTarget) => set({ brushTarget }),
+
+  paintLayerMask: (layerId, next) => {
+    const { doc, commit } = get()
+    if (!doc) return
+    commit('涂抹图层蒙版', updateLayerOp(doc, layerId, {
+      mask: next ? { data: next.data, width: next.width, height: next.height } : undefined,
+    }))
+  },
+
+  setLayerMask: (layerId, mask) => {
+    const { doc, commit } = get()
+    if (!doc) return
+    commit(mask ? '添加蒙版' : '移除蒙版', updateLayerOp(doc, layerId, { mask }))
+  },
+
+  setLayerOpacity: (layerId, opacity) => {
+    const { doc, patch } = get()
+    if (!doc) return
+    const v = Math.max(0, Math.min(1, opacity))
+    patch(updateLayerOp(doc, layerId, { opacity: v }))
+  },
+
+  setLayerBlend: (layerId, blendMode) => {
+    const { doc, patch } = get()
+    if (!doc) return
+    patch(updateLayerOp(doc, layerId, { blendMode }))
+  },
+
+  renameLayer: (layerId, name) => {
+    const { doc, commit } = get()
+    if (!doc) return
+    const clean = name.trim()
+    if (!clean) return
+    commit('重命名图层', updateLayerOp(doc, layerId, { name: clean }))
+  },
+
+  duplicateLayer: (layerId) => {
+    const { doc, commit } = get()
+    if (!doc) return
+    const src = doc.layers.find((l) => l.id === layerId)
+    if (!src) return
+    // 蒙版数据要深拷贝，否则两个图层会共享同一块内存
+    const copy: Layer = {
+      ...src,
+      id: uid('layer'),
+      name: `${src.name} 副本`,
+      mask: src.mask?.data
+        ? { ...src.mask, data: new Uint8ClampedArray(src.mask.data) }
+        : src.mask,
+    }
+    commit('复制图层', insertLayerAbove(doc, layerId, copy))
+  },
 }))
 
 /** 便捷选择器 */

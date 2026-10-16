@@ -6,11 +6,11 @@ import { useEditor } from '../../state/editorStore'
 import { LassoTool } from '../../core/selection/lasso'
 import { RectTool } from '../../core/selection/rect'
 import { BrushTool } from '../../core/selection/brush'
-import { DEFAULT_BRUSH } from '../../core/selection/brush'
 import { magicWand, createMask, feather } from '../../core/selection/mask'
 import { useComposedBitmap } from './useComposedBitmap'
 import { SelectionOverlay } from './SelectionOverlay'
 import { SelectionBar } from './SelectionBar'
+import { BrushBar } from './BrushBar'
 import { useGestures } from './useGestures'
 import './CanvasStage.css'
 
@@ -32,6 +32,14 @@ export function CanvasStage() {
   const setShowOriginal = useEditor((s) => s.setShowOriginal)
   const sourceBitmap = useEditor((s) => s.sourceBitmap)
   const pushSelectionHistory = useEditor((s) => s.pushSelectionHistory)
+  const brushSettings = useEditor((s) => s.brush)
+  const brushTarget = useEditor((s) => s.brushTarget)
+  const paintLayerMask = useEditor((s) => s.paintLayerMask)
+  const activeLayerId = useEditor((s) => s.doc?.activeLayerId)
+
+  // 笔刷要实时读到最新参数，用 ref 避免闭包捕获旧值
+  const brushRef = useRef({ settings: brushSettings, target: brushTarget, layerId: activeLayerId })
+  brushRef.current = { settings: brushSettings, target: brushTarget, layerId: activeLayerId }
 
   // 切换工具时清掉未完成的预览，避免残留图形
   useEffect(() => {
@@ -151,11 +159,24 @@ export function CanvasStage() {
       const mask = magicWand(img.data, bmp.width, bmp.height, px, py, 32)
       setSelection(mask)
     } else if (tool === 'brush' || tool === 'erase') {
-      // 原实现首次落笔只建空蒙版就 return，导致第一下涂抹丢失。
-      // 改为：没有蒙版就用当前笔触直接建立，然后再应用这一笔。
-      const base = selection ?? createMask(doc.width, doc.height, 0)
-      const s = { ...DEFAULT_BRUSH, erase: tool === 'erase' }
-      setSelection(brush.begin(base, s, p.x, p.y))
+      const bs = brushRef.current
+      // 涂蒙版时默认涂黑（遮住），涂选区时默认涂白（选中）
+      const isMask = bs.target === 'layer-mask'
+      const s = { ...bs.settings, erase: tool === 'erase', target: (isMask ? 0 : 255) as 0 | 255 }
+
+      if (isMask && bs.layerId) {
+        // 图层的蒙版：落笔涂黑＝遮住，与 PS 一致
+        const layer = doc.layers.find((l) => l.id === bs.layerId)
+        const existing = layer?.mask?.data
+          ? { data: layer.mask.data, width: layer.mask.width, height: layer.mask.height }
+          : createMask(doc.width, doc.height, 255)
+        setSelection(brush.begin(existing, s, p.x, p.y))
+      } else {
+        // 原实现首次落笔只建空蒙版就 return，导致第一下涂抹丢失。
+        // 改为：没有蒙版就用当前笔触直接建立，然后再应用这一笔。
+        const base = selection ?? createMask(doc.width, doc.height, 0)
+        setSelection(brush.begin(base, s, p.x, p.y))
+      }
     }
   }, [doc, tool, toDoc, composed, selection, setSelection])
 
@@ -178,7 +199,12 @@ export function CanvasStage() {
       const pts = lasso.getPoints()
       setLassoPoints(pts.flatMap((q) => [q.x, q.y]))
     } else if ((tool === 'brush' || tool === 'erase') && selection) {
-      const s = { ...DEFAULT_BRUSH, erase: tool === 'erase' }
+      const bs = brushRef.current
+      const s = {
+        ...bs.settings,
+        erase: tool === 'erase',
+        target: (bs.target === 'layer-mask' ? 0 : 255) as 0 | 255,
+      }
       setSelection(brush.move(selection, s, p.x, p.y))
     }
   }, [doc, tool, toDoc, selection, setSelection])
@@ -195,12 +221,18 @@ export function CanvasStage() {
       if (m) pushSelectionHistory('套索选区', m)
       setLassoPoints([])
     }
-    // 笔刷/擦除结束后把选区写入历史，否则撤销无效
+    // 笔刷/擦除结束后写入历史，否则撤销无效
     if ((tool === 'brush' || tool === 'erase') && selection) {
-      pushSelectionHistory(tool === 'erase' ? '擦除选区' : '涂抹选区', selection)
+      const bs = brushRef.current
+      if (bs.target === 'layer-mask' && bs.layerId) {
+        // 图层蒙版是图层属性，走图层历史
+        paintLayerMask(bs.layerId, selection)
+      } else {
+        pushSelectionHistory(tool === 'erase' ? '擦除选区' : '涂抹选区', selection)
+      }
     }
     brush.end()
-  }, [tool, doc, selection, setSelection, pushSelectionHistory])
+  }, [tool, doc, selection, setSelection, pushSelectionHistory, paintLayerMask])
 
   const stageW = size.w
   const stageH = size.h
@@ -272,13 +304,16 @@ export function CanvasStage() {
         </KLayer>
       </Stage>
 
-      {/* 笔刷光标：跟随手指 */}
+      {/* 笔刷光标：跟随手指，直径与真实笔触一致 */}
       {brushCursor && (tool === 'brush' || tool === 'erase') && (
         <div
           className="brush-cursor"
+          data-erase={tool === 'erase'}
           style={{
             left: transform.x + brushCursor.x * base.scale * view.zoom,
             top: transform.y + brushCursor.y * base.scale * view.zoom,
+            width: brushSettings.radius * 2 * base.scale * view.zoom,
+            height: brushSettings.radius * 2 * base.scale * view.zoom,
           }}
         />
       )}
@@ -286,6 +321,7 @@ export function CanvasStage() {
       {showOriginal && <div className="original-badge">原图</div>}
 
       <SelectionBar />
+      <BrushBar />
     </div>
   )
 }

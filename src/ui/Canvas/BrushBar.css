@@ -1,0 +1,113 @@
+/* 笔刷参数条 */
+
+.brush-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--h-toolbar) + var(--safe-b) + 12px);
+  z-index: 20;
+  background: var(--c-bg);
+  border-radius: var(--r-md);
+  box-shadow: 0 4px 20px rgba(10, 10, 10, 0.16);
+  overflow: hidden;
+  animation: enter-rise var(--dur-base) var(--ease-out) both;
+}
+
+/* 头部：点击展开参数 */
+.brush-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--c-ink);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.brush-head:hover { background: var(--c-ink-04); }
+.brush-head:active { transform: scale(0.99); }
+
+.brush-head-icon { display: flex; color: var(--c-accent); }
+.brush-head-text { flex: 1; text-align: left; }
+
+.brush-head-target {
+  font-size: 11px;
+  color: var(--c-ink-50);
+  background: var(--c-ink-06);
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+}
+
+.brush-head-chevron {
+  color: var(--c-ink-40);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.brush-head-chevron[data-open='true'] { transform: rotate(180deg); }
+
+/* 展开的参数面板 */
+.brush-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 14px 14px;
+  animation: enter-rise var(--dur-base) var(--ease-out) both;
+}
+
+/* 作用对象切换 */
+.brush-target {
+  display: flex;
+  gap: 8px;
+  padding: 3px;
+  background: var(--c-ink-06);
+  border-radius: var(--r-sm);
+}
+
+.brush-target-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--c-ink-60);
+  cursor: pointer;
+  transition: background-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.brush-target-btn[data-on='true'] {
+  background: var(--c-bg);
+  color: var(--c-accent);
+  box-shadow: 0 1px 4px rgba(10, 10, 10, 0.1);
+}
+.brush-target-btn:active { transform: scale(0.97); }
+
+.brush-foot {
+  display: flex;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-ink-06);
+}
+
+.brush-foot-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--c-ink-40);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brush-bar,
+  .brush-panel { animation: none; }
+  .brush-head-chevron { transition: none; }
+}

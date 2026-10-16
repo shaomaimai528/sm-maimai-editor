@@ -236,7 +236,13 @@ function erode(mask: MaskBuffer, r: number): MaskBuffer {
   return { data: out, width, height }
 }
 
-/** 在蒙版上绘制笔刷：硬度控制边缘柔和度，流量控制叠加浓度 */
+/**
+ * 在蒙版上绘制笔刷：硬度控制边缘柔和度，流量控制叠加浓度
+ *
+ * @param target 落笔推向的目标值。选区用 255（涂白＝选中）；
+ *               图层蒙版用 0（涂黑＝遮住），与 PS 里"加蒙版后涂黑隐藏"一致。
+ * @param erase  擦除方向，把 target 反向——即把刚涂的东西擦回去
+ */
 export function paintBrush(
   mask: MaskBuffer,
   cx: number,
@@ -244,7 +250,8 @@ export function paintBrush(
   radius: number,
   hardness: number,
   flow: number,
-  erase: boolean
+  erase: boolean,
+  target: 0 | 255 = 255
 ): MaskBuffer {
   const { width, height, data } = mask
   const out = new Uint8ClampedArray(data)
@@ -267,7 +274,9 @@ export function paintBrush(
       const a = Math.max(0, Math.min(1, t)) * f
       const idx = y * width + x
       const cur = out[idx]
-      out[idx] = erase ? cur * (1 - a) : cur + (255 - cur) * a
+      // 擦除就是朝相反方向推
+      const goal = erase ? (target === 0 ? 255 : 0) : target
+      out[idx] = cur + (goal - cur) * a
     }
   }
   return { data: out, width, height }

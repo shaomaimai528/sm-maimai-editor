@@ -73,12 +73,34 @@ export async function composeResult(
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
 
-  // 1. 把 AI 结果缩放回上下文框的原始像素尺寸
-  ctx.drawImage(result, 0, 0, result.width, result.height, 0, 0, Math.round(box.w), Math.round(box.h))
+  // 1. 把 AI 结果还原到上下文框的原始像素尺寸
+  //
+  // 多数模型会保持输入宽高比（实测 XEM 输入 800x300 返回 2048x768，比例一致），
+  // 但部分模型固定输出 1:1。此时直接拉伸会让画面变形、贴回后"对不上"。
+  // 因此先等比铺满，再把多出来的部分居中裁掉 —— 保证不形变且中心对齐。
+  const tw = Math.round(box.w)
+  const th = Math.round(box.h)
+  const srcAR = result.width / result.height
+  const dstAR = tw / th
+  if (Math.abs(srcAR - dstAR) > 0.01) {
+    // 等比放大到刚好覆盖目标框
+    let dw = tw
+    let dh = th
+    if (srcAR > dstAR) {
+      dw = Math.round(th * srcAR)   // 太宽，左右裁
+    } else {
+      dh = Math.round(tw / srcAR)   // 太高，上下裁
+    }
+    const dx = Math.round((tw - dw) / 2)
+    const dy = Math.round((th - dh) / 2)
+    ctx.drawImage(result, 0, 0, result.width, result.height, dx, dy, dw, dh)
+  } else {
+    ctx.drawImage(result, 0, 0, result.width, result.height, 0, 0, tw, th)
+  }
 
   // 2. 取出结果像素
-  const w = Math.round(box.w)
-  const h = Math.round(box.h)
+  const w = tw
+  const h = th
   const imgData = ctx.getImageData(0, 0, w, h)
   const px = imgData.data
 
