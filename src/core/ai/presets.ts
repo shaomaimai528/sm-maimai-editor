@@ -21,7 +21,7 @@
  */
 
 import type { CustomSpec } from './types'
-import { LOCAL_KEYS, LOCAL_RUNNINGHUB, LOCAL_WORKFLOWS } from './local-keys'
+import { LOCAL_KEYS, LOCAL_RUNNINGHUB, LOCAL_WORKFLOWS } from './keys'
 
 export interface ChannelPreset {
   /** 稳定标识，用于生成渠道 id */
